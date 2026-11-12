@@ -194,10 +194,14 @@ function loadVideoFileIntoSlot(file, slot) {
     } else {
       AppState.overlay.userVideoLoaded = true;
       document.getElementById('badge-user').innerHTML = `📹 ВАШЕ ВИДЕО (LIVE AI АНАЛИЗ): ${file.name.slice(0, 18)}`;
+      Viewer3D.cam.zoom = 1.0;
+      Viewer3D.cam.panX = 0;
+      Viewer3D.cam.panY = 35;
       if (window.AIPoseEngine) {
         window.AIPoseEngine.smoothedVideoAnchor.initialized = false;
         window.AIPoseEngine.liveUserPose3D = null;
         window.AIPoseEngine.liveUserLandmarks2D = null;
+        window.AIPoseEngine.videoLock.active = false;
         window.AIPoseEngine.videoMetrics.framesAnalyzed = 0;
         window.AIPoseEngine.videoMetrics.minKneeAngleDeg = 165;
         window.AIPoseEngine.videoMetrics.fileName = file.name;
@@ -259,64 +263,229 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h) {
 }
 
 /**
- * Draws the live MediaPipe 2D skeleton + measured joint angles directly on the uploaded video player!
+ * Draws the Blue 3D Volumetric Anatomical Mesh, 3D Shoes, Foot Vectors, and Live Joint Angles
+ * 1:1 directly onto the detected player in the uploaded video!
  */
-function drawDirectVideoAISkeleton(ctx, rect) {
+function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.92) {
   if (!rect || !window.AIPoseEngine || !window.AIPoseEngine.liveUserLandmarks2D) return;
   const lm = window.AIPoseEngine.liveUserLandmarks2D;
+  const lock = window.AIPoseEngine.videoLock;
+  const vm = window.AIPoseEngine.videoMetrics;
+
   const pt = (idx) => ({
     x: rect.dx + lm[idx].x * rect.dw,
     y: rect.dy + lm[idx].y * rect.dh
   });
 
-  const pairs = [
-    [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
-    [11, 23], [12, 24], [23, 24],
-    [23, 25], [25, 27], [27, 29], [29, 31],
-    [24, 26], [26, 28], [28, 30], [30, 32]
-  ];
+  const playerPxSpan = Math.max(45, (lock.torsoLegNormSpan || 0.28) * rect.dh);
+  const s = Math.max(0.28, Math.min(1.25, playerPxSpan / 215));
+
+  const draw2DVolLimb = (p1, p2, baseRad) => {
+    const r = Math.max(2.5, baseRad * s);
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    ctx.strokeStyle = theme.wireframe;
+    ctx.lineWidth = r * 2.05;
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+
+    ctx.strokeStyle = theme.main;
+    ctx.lineWidth = r * 1.82;
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+
+    ctx.strokeStyle = theme.highlight;
+    ctx.lineWidth = r * 0.72;
+    ctx.beginPath();
+    ctx.moveTo(p1.x - nx * r * 0.24, p1.y - ny * r * 0.24);
+    ctx.lineTo(p2.x - nx * r * 0.24, p2.y - ny * r * 0.24);
+    ctx.stroke();
+
+    const midX = (p1.x + p2.x) * 0.5;
+    const midY = (p1.y + p2.y) * 0.5;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.ellipse(midX, midY, r * 0.42, r * 0.92, Math.atan2(dy, dx), 0, Math.PI * 2);
+    ctx.stroke();
+  };
 
   ctx.save();
-  ctx.strokeStyle = "#34d399";
-  ctx.lineWidth = 3.5;
-  ctx.lineCap = "round";
-  pairs.forEach(([a, b]) => {
-    if (!lm[a] || !lm[b]) return;
-    const pA = pt(a), pB = pt(b);
-    ctx.beginPath();
-    ctx.moveTo(pA.x, pA.y);
-    ctx.lineTo(pB.x, pB.y);
-    ctx.stroke();
-  });
+  ctx.globalAlpha = alpha;
 
-  [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 31, 32].forEach((idx) => {
-    if (!lm[idx]) return;
-    const p = pt(idx);
-    ctx.fillStyle = "#10b981";
+  const pHead = pt(0);
+  const pShL = pt(11), pShR = pt(12);
+  const pElL = pt(13), pElR = pt(14);
+  const pWrL = pt(15), pWrR = pt(16);
+  const pHipL = pt(23), pHipR = pt(24);
+  const pKneeL = pt(25), pKneeR = pt(26);
+  const pAnkL = pt(27), pAnkR = pt(28);
+  const pHeelL = pt(29), pHeelR = pt(30);
+  const pToeL = pt(31), pToeR = pt(32);
+
+  // 1. 3D Weight Rings & Shoes directly under the video player's feet
+  [
+    { ank: pAnkL, heel: pHeelL, toe: pToeL, w: vm.weightFrontPct, tag: 'Лев' },
+    { ank: pAnkR, heel: pHeelR, toe: pToeR, w: 100 - vm.weightFrontPct, tag: 'Прав' }
+  ].forEach(({ ank, heel, toe, w, tag }) => {
+    const ringR = Math.max(8, (11 + (w / 100) * 18) * s);
+    ctx.fillStyle = theme.glowRing;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    ctx.ellipse(ank.x, ank.y + 4 * s, ringR, ringR * 0.48, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = 1.4;
     ctx.stroke();
+
+    // 3D Shoe Sole Capsule
+    const shoeW = Math.max(4, 12 * s);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = shoeW + 2;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(heel.x, heel.y); ctx.lineTo(toe.x, toe.y); ctx.stroke();
+    ctx.strokeStyle = theme.shoeColor;
+    ctx.lineWidth = shoeW;
+    ctx.beginPath(); ctx.moveTo(heel.x, heel.y); ctx.lineTo(toe.x, toe.y); ctx.stroke();
+
+    // Toe direction arrow
+    const fdx = toe.x - heel.x;
+    const fdy = toe.y - heel.y;
+    const flen = Math.hypot(fdx, fdy) || 1;
+    draw2DArrow(
+      ctx,
+      toe.x,
+      toe.y,
+      toe.x + (fdx / flen) * 22 * s,
+      toe.y + (fdy / flen) * 22 * s,
+      theme.accent,
+      2.0
+    );
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 9px monospace";
+    ctx.fillText(`${tag}:${Math.round(w)}%`, ank.x - 18, ank.y + 16 * s + 6);
   });
 
-  // Live Angle Callouts directly on the video player's Knee and Elbow
-  const vm = window.AIPoseEngine.videoMetrics;
-  const pKnee = pt(26);
-  const pElbow = pt(14);
-  ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
-  ctx.fillRect(pKnee.x + 10, pKnee.y - 10, 96, 20);
-  ctx.fillStyle = "#34d399";
-  ctx.font = "bold 11px monospace";
-  ctx.fillText(`Колено: ${vm.kneeAngleDeg}°`, pKnee.x + 14, pKnee.y + 4);
+  // 2. 3D Volumetric Legs on Video Player
+  draw2DVolLimb(pHipL, pKneeL, 14.0);
+  draw2DVolLimb(pKneeL, pAnkL, 10.8);
+  draw2DVolLimb(pHipR, pKneeR, 14.0);
+  draw2DVolLimb(pKneeR, pAnkR, 10.8);
 
-  ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
-  ctx.fillRect(pElbow.x + 10, pElbow.y - 10, 96, 20);
+  // 3. 3D Sculpted Torso, Pelvis & Clavicles on Video Player
+  draw2DVolLimb(pHipL, pHipR, 13.0);
+  const midSh = { x: (pShL.x + pShR.x) * 0.5, y: (pShL.y + pShR.y) * 0.5 };
+  const midHip = { x: (pHipL.x + pHipR.x) * 0.5, y: (pHipL.y + pHipR.y) * 0.5 };
+  const torsoGrad = ctx.createLinearGradient(midSh.x, midSh.y, midHip.x, midHip.y);
+  torsoGrad.addColorStop(0, theme.highlight);
+  torsoGrad.addColorStop(0.55, theme.main);
+  torsoGrad.addColorStop(1, theme.boxFill);
+  ctx.fillStyle = torsoGrad;
+  ctx.strokeStyle = theme.wireframe;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(pShL.x, pShL.y);
+  ctx.lineTo(pShR.x, pShR.y);
+  ctx.lineTo(pHipR.x, pHipR.y);
+  ctx.lineTo(pHipL.x, pHipL.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  draw2DVolLimb(pShL, pShR, 12.5);
+  draw2DVolLimb(midSh, pHead, 8.0);
+
+  // 4. 3D Volumetric Arms (Both Left and Right!) on Video Player
+  draw2DVolLimb(pShL, pElL, 10.0);
+  draw2DVolLimb(pElL, pWrL, 8.2);
+  draw2DVolLimb(pShR, pElR, 10.0);
+  draw2DVolLimb(pElR, pWrR, 8.2);
+
+  // 5. 3D Shaded Joint Spheres on Video Player
+  [pShL, pShR, pElL, pElR, pWrL, pWrR, pHipL, pHipR, pKneeL, pKneeR, pAnkL, pAnkR].forEach(j => {
+    const jr = Math.max(2.8, 5.8 * s);
+    const jGrad = ctx.createRadialGradient(j.x - jr * 0.3, j.y - jr * 0.3, 0.5, j.x, j.y, jr);
+    jGrad.addColorStop(0, "#ffffff");
+    jGrad.addColorStop(0.5, theme.accent);
+    jGrad.addColorStop(1, theme.main);
+    ctx.fillStyle = jGrad;
+    ctx.beginPath();
+    ctx.arc(j.x, j.y, jr, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // 6. 3D Sculpted Head Sphere & Visor on Video Player
+  const headR = Math.max(6, 16.5 * s);
+  const headGrad = ctx.createRadialGradient(pHead.x - 3 * s, pHead.y - 4 * s, 1, pHead.x, pHead.y, headR);
+  headGrad.addColorStop(0, "#ffffff");
+  headGrad.addColorStop(0.35, theme.highlight);
+  headGrad.addColorStop(1, theme.main);
+  ctx.fillStyle = headGrad;
+  ctx.beginPath();
+  ctx.arc(pHead.x, pHead.y, headR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+
+  ctx.fillStyle = theme.accent;
+  ctx.font = "bold 11px sans-serif";
+  ctx.fillText("👤 Вы (1:1 Видео)", pHead.x - 42, pHead.y - headR - 8);
+
+  // 7. Live Biomechanical Angle Callouts on Knee and Active Elbow
+  const pKnee = pKneeR.y > pKneeL.y ? pKneeR : pKneeL;
+  const pElbow = Math.abs(pWrL.x - midSh.x) > Math.abs(pWrR.x - midSh.x) ? pElL : pElR;
+
+  ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
+  ctx.fillRect(pKnee.x + 10, pKnee.y - 10, 96, 19);
+  ctx.strokeStyle = "#34d399";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pKnee.x + 10, pKnee.y - 10, 96, 19);
+  ctx.fillStyle = "#34d399";
+  ctx.font = "bold 10px monospace";
+  ctx.fillText(`Колено: ${vm.kneeAngleDeg}°`, pKnee.x + 14, pKnee.y + 3);
+
+  ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
+  ctx.fillRect(pElbow.x + 10, pElbow.y - 10, 96, 19);
+  ctx.strokeStyle = "#38bdf8";
+  ctx.strokeRect(pElbow.x + 10, pElbow.y - 10, 96, 19);
   ctx.fillStyle = "#38bdf8";
-  ctx.fillText(`Локоть: ${vm.elbowAngleDeg}°`, pElbow.x + 14, pElbow.y + 4);
+  ctx.fillText(`Локоть: ${vm.elbowAngleDeg}°`, pElbow.x + 14, pElbow.y + 3);
 
   ctx.restore();
+}
+
+/**
+ * Analytically solves for the exact (cx, cy, scale) so the Pro 3D Ghost:
+ * - Has the EXACT same shoulder-to-ankle pixel height as the player in the video,
+ * - Stands on the EXACT same floor line (ankles Y) as the player in the video,
+ * - Aligns horizontally (pelvis X) with the player in the video!
+ */
+function computeLockedProTransform(proPose, vidRect, lock, proCam) {
+  const uShL = project3D(proPose.shL, 0, 0, 1, proCam);
+  const uShR = project3D(proPose.shR, 0, 0, 1, proCam);
+  const uAnkL = project3D(proPose.footL.ankle, 0, 0, 1, proCam);
+  const uAnkR = project3D(proPose.footR.ankle, 0, 0, 1, proCam);
+  const uHip = project3D(proPose.pelvisPos, 0, 0, 1, proCam);
+
+  const uShY = (uShL.y + uShR.y) * 0.5;
+  const uAnkY = (uAnkL.y + uAnkR.y) * 0.5;
+  const unitSpanY = Math.max(0.45, Math.abs(uAnkY - uShY));
+
+  const playerPxSpan = Math.max(48, (lock.torsoLegNormSpan || 0.28) * vidRect.dh);
+  const proScale = (playerPxSpan / unitSpanY) * Viewer3D.cam.zoom;
+
+  const targetHipX = vidRect.dx + lock.hipNormX * vidRect.dw + Viewer3D.cam.panX;
+  const targetAnkleY = vidRect.dy + lock.ankleNormY * vidRect.dh + (Viewer3D.cam.panY - 35);
+
+  const proCX = targetHipX - proScale * uHip.x;
+  const proCY = targetAnkleY - proScale * uAnkY;
+
+  return { cx: proCX, cy: proCY, scale: proScale };
 }
 
 // =========================================================================================
@@ -720,7 +889,7 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   ctx.save();
   ctx.globalAlpha = alpha;
 
-  const tNow = AppState.overlay.progress;
+  const tNow = pose._phaseT !== undefined ? pose._phaseT : AppState.overlay.progress;
   const nextPose = interpolate3DPose(keyframes, Math.min(1.0, tNow + 0.06));
 
   // 0. FLUID COMET TRAILS
@@ -1009,10 +1178,37 @@ function render3DOverlayStage() {
     if (AppState.overlay.proVideoLoaded) processVideoFrameWithAI(proVid, 'pro', nowMs + 1);
   }
 
-  const proPose = interpolate3DPose(stroke.proKeyframes, t);
+  const lock = (window.AIPoseEngine && window.AIPoseEngine.videoLock)
+    ? window.AIPoseEngine.videoLock
+    : {
+        active: false,
+        hipNormX: 0.54,
+        hipNormY: 0.46,
+        ankleNormY: 0.58,
+        shNormY: 0.33,
+        torsoLegNormSpan: 0.25,
+        facingSign: -1,
+        matchedYawDeg: -86,
+        matchedPitchDeg: 10,
+        matchedPhaseT: 0.62
+      };
+
+  const autoAlign = Boolean(window.AIPoseEngine ? window.AIPoseEngine.autoAlignEnabled : true);
+  const effectivePhaseT = (AppState.overlay.userVideoLoaded && autoAlign && lock.active)
+    ? lock.matchedPhaseT
+    : t;
+
+  const proPose = interpolate3DPose(stroke.proKeyframes, effectivePhaseT);
+  proPose._phaseT = effectivePhaseT;
+
   const userPose = (AppState.overlay.userVideoLoaded && window.AIPoseEngine && window.AIPoseEngine.liveUserPose3D)
     ? window.AIPoseEngine.liveUserPose3D
-    : interpolate3DPose(stroke.userKeyframes, t);
+    : interpolate3DPose(stroke.userKeyframes, effectivePhaseT);
+  userPose._phaseT = effectivePhaseT;
+
+  const proCam = (AppState.overlay.userVideoLoaded && autoAlign)
+    ? { yaw: lock.matchedYawDeg, pitch: lock.matchedPitchDeg }
+    : { yaw: Viewer3D.cam.yaw, pitch: Viewer3D.cam.pitch };
 
   const proTheme = {
     label: `⭐ ${stroke.proName.split('(')[0].trim()}`,
@@ -1030,7 +1226,7 @@ function render3DOverlayStage() {
   };
 
   const userTheme = {
-    label: AppState.overlay.userVideoLoaded ? "👤 Вы (По вашему видео)" : "👤 Ваша 3D-модель",
+    label: AppState.overlay.userVideoLoaded ? "👤 Вы (1:1 Видео)" : "👤 Ваша 3D-модель",
     main: "rgba(2, 132, 199, 0.85)",
     highlight: "rgba(125, 211, 252, 0.92)",
     accent: "#38bdf8",
@@ -1055,19 +1251,24 @@ function render3DOverlayStage() {
       drawCleanVideoCover(ctx, proVid, 0, 0, w / 2, h);
     }
     if (!AppState.overlay.proVideoLoaded || Viewer3D.layers.show3DOverVideo) {
-      draw3DFloorGrid(ctx, w * 0.25, centerY, baseScale * 0.86);
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, w * 0.25, centerY, baseScale * 0.86, proTheme, 0.95);
+      draw3DFloorGrid(ctx, w * 0.25, centerY, baseScale * 0.86, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, w * 0.25, centerY, baseScale * 0.86, proTheme, 0.95, proCam);
     }
     ctx.restore();
 
     ctx.save();
     ctx.beginPath(); ctx.rect(w / 2, 0, w / 2, h); ctx.clip();
-    let vidRect = null;
     if (AppState.overlay.userVideoLoaded) {
-      vidRect = drawCleanVideoCover(ctx, userVid, w / 2, 0, w / 2, h);
-      drawDirectVideoAISkeleton(ctx, vidRect);
-    }
-    if (!AppState.overlay.userVideoLoaded || Viewer3D.layers.show3DOverVideo) {
+      const vidRect = drawCleanVideoCover(ctx, userVid, w / 2, 0, w / 2, h);
+      if (Viewer3D.layers.show3DOverVideo && vidRect) {
+        if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.92);
+        } else {
+          const tf = computeLockedProTransform(userPose, vidRect, lock, proCam);
+          draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, 0.88, proCam);
+        }
+      }
+    } else {
       draw3DFloorGrid(ctx, w * 0.75, centerY, baseScale * 0.86);
       draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, w * 0.75, centerY, baseScale * 0.86, userTheme, 0.95);
     }
@@ -1079,21 +1280,43 @@ function render3DOverlayStage() {
 
   } else if (AppState.overlay.mode === 'curtain') {
     const splitX = AppState.overlay.curtainX * w;
+    let sharedVidRect = null;
+    if (AppState.overlay.userVideoLoaded) {
+      // Pre-compute video rect so both sides of the curtain lock to the exact same player coordinates
+      const vw = userVid.videoWidth || 720;
+      const vh = userVid.videoHeight || 1280;
+      const s = Math.min(w / vw, h / vh);
+      sharedVidRect = { dx: (w - vw * s) / 2, dy: (h - vh * s) / 2, dw: vw * s, dh: vh * s };
+    }
 
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, splitX, h); ctx.clip();
     if (AppState.overlay.proVideoLoaded) drawCleanVideoCover(ctx, proVid, 0, 0, w, h);
-    draw3DFloorGrid(ctx, centerX, centerY, baseScale);
-    draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, centerX, centerY, baseScale, proTheme, 0.95);
+    else if (AppState.overlay.userVideoLoaded) drawCleanVideoCover(ctx, userVid, 0, 0, w, h);
+
+    if (sharedVidRect) {
+      const tf = computeLockedProTransform(proPose, sharedVidRect, lock, proCam);
+      draw3DFloorGrid(ctx, tf.cx, tf.cy, tf.scale, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, 0.95, proCam);
+    } else {
+      draw3DFloorGrid(ctx, centerX, centerY, baseScale, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, centerX, centerY, baseScale, proTheme, 0.95, proCam);
+    }
     ctx.restore();
 
     ctx.save();
     ctx.beginPath(); ctx.rect(splitX, 0, w - splitX, h); ctx.clip();
     if (AppState.overlay.userVideoLoaded) {
       const vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, w, h);
-      drawDirectVideoAISkeleton(ctx, vidRect);
-    }
-    if (!AppState.overlay.userVideoLoaded || Viewer3D.layers.show3DOverVideo) {
+      if (Viewer3D.layers.show3DOverVideo && vidRect) {
+        if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.92);
+        } else {
+          const tf = computeLockedProTransform(userPose, vidRect, lock, proCam);
+          draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, 0.88, proCam);
+        }
+      }
+    } else {
       draw3DFloorGrid(ctx, centerX, centerY, baseScale);
       draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, centerX, centerY, baseScale, userTheme, 0.95);
     }
@@ -1103,11 +1326,11 @@ function render3DOverlayStage() {
     const proAlpha = 1.0 - AppState.overlay.alpha;
     const userAlpha = AppState.overlay.alpha;
 
+    let vidRect = null;
     if (AppState.overlay.userVideoLoaded) {
       ctx.save();
       ctx.globalAlpha = AppState.overlay.proVideoLoaded ? Math.max(0.45, userAlpha) : 1.0;
-      const vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, w, h);
-      drawDirectVideoAISkeleton(ctx, vidRect);
+      vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, w, h);
       ctx.restore();
     }
     if (AppState.overlay.proVideoLoaded) {
@@ -1117,14 +1340,47 @@ function render3DOverlayStage() {
       ctx.restore();
     }
 
-    if ((!AppState.overlay.userVideoLoaded && !AppState.overlay.proVideoLoaded) || Viewer3D.layers.show3DOverVideo) {
+    if (AppState.overlay.userVideoLoaded && vidRect) {
+      if (Viewer3D.layers.show3DOverVideo) {
+        // Compute exact 1:1 scale & anchor on the video player's court floor & body height!
+        const tf = computeLockedProTransform(proPose, vidRect, lock, proCam);
+
+        // 1. Draw 3D Court Floor Grid scaled & anchored right under the player's feet in the video
+        draw3DFloorGrid(ctx, tf.cx, tf.cy, tf.scale, proCam);
+
+        // 2. Draw Blue User 3D Volumetric Athlete directly 1:1 on the player in the video (NO duplicate floating blue model!)
+        if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, Math.max(0.45, userAlpha));
+        } else {
+          const uTf = computeLockedProTransform(userPose, vidRect, lock, proCam);
+          draw3DVolumetricAthlete(
+            ctx, userPose, stroke.userKeyframes,
+            uTf.cx, uTf.cy, uTf.scale,
+            userTheme,
+            Math.max(0.42, userAlpha),
+            proCam
+          );
+        }
+
+        // 3. Draw Gold Pro Reference 3D Ghost locked 1:1 to the player's height, floor line, facing direction & swing phase!
+        const pPro = draw3DVolumetricAthlete(
+          ctx, proPose, stroke.proKeyframes,
+          tf.cx, tf.cy, tf.scale,
+          proTheme,
+          Math.max(0.42, proAlpha),
+          proCam
+        );
+
+        draw3DDeltaCallouts(ctx, proPose, userPose, pPro, null, tf.cx, tf.cy, tf.scale, proCam);
+      }
+    } else if (!AppState.overlay.userVideoLoaded && (!AppState.overlay.proVideoLoaded || Viewer3D.layers.show3DOverVideo)) {
       draw3DFloorGrid(ctx, centerX, centerY, baseScale);
 
       const pUser = draw3DVolumetricAthlete(
         ctx, userPose, stroke.userKeyframes,
         centerX, centerY, baseScale,
         userTheme,
-        AppState.overlay.userVideoLoaded ? Math.min(0.75, userAlpha) : Math.max(0.32, userAlpha)
+        Math.max(0.32, userAlpha)
       );
 
       const pPro = draw3DVolumetricAthlete(
@@ -1140,7 +1396,7 @@ function render3DOverlayStage() {
 
   let activePhase = stroke.phases[0];
   stroke.phases.forEach(p => {
-    if (Math.abs(t - p.t) < 0.14) activePhase = p;
+    if (Math.abs(effectivePhaseT - p.t) < 0.14) activePhase = p;
   });
   const phaseEl = document.getElementById('hud-phase-name');
   if (phaseEl) phaseEl.textContent = activePhase.label;
@@ -1151,12 +1407,13 @@ function render3DOverlayStage() {
   }
 }
 
-function draw3DDeltaCallouts(ctx, proPose, userPose, pPro, pUser, cx, cy, scale) {
+function draw3DDeltaCallouts(ctx, proPose, userPose, pPro, pUser, cx, cy, scale, camOverride) {
   ctx.save();
 
-  if (AppState.overlay.progress >= 0.48 && AppState.overlay.progress <= 0.74) {
-    const bPro = project3D(proPose.ball, cx, cy, scale);
-    const bUsr = project3D(userPose.ball, cx, cy, scale);
+  const phaseT = proPose._phaseT !== undefined ? proPose._phaseT : AppState.overlay.progress;
+  if (phaseT >= 0.48 && phaseT <= 0.74) {
+    const bPro = project3D(proPose.ball, cx, cy, scale, camOverride);
+    const bUsr = project3D(userPose.ball, cx, cy, scale, camOverride);
 
     ctx.strokeStyle = "#ef4444";
     ctx.lineWidth = 2.0;
