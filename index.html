@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tennis Pro Analytics — Система анализа биомеханики и тактики ATP</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎾</text></svg>" />
+  <meta property="og:title" content="Tennis Pro Analytics — Система анализа биомеханики и тактики ATP" />
+  <meta property="og:description" content="Приложение для видеоанализа ударов со слоу-мо профи, карты рассеивания ударов, трекинга перемещений по корту и телеметрии полёта мяча." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    if (!window.tailwind) {
+      document.write('<script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"><\/script>');
+    }
+  </script>
+  <style>
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .court-bg {
+      background: radial-gradient(circle at 50% 50%, #1e40af 0%, #172554 100%);
+    }
+    input[type="range"] {
+      accent-color: #38bdf8;
+    }
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.4); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.8); }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased select-none font-sans">
+
+  <!-- Top Navigation & Global Header -->
+  <header class="border-b border-slate-800 bg-slate-900/90 sticky top-0 z-50 backdrop-blur px-4 py-2.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <!-- App Brand & ATP Consultant Badge -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-amber-500 to-sky-500 flex items-center justify-center font-black text-slate-950 text-base shadow-lg shadow-sky-500/20">
+          🎾
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base font-bold tracking-tight text-white">Tennis Pro Analytics</h1>
+            <span class="px-2 py-0.5 rounded text-[11px] font-bold tracking-wide uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              ATP / Semi-Pro Standard
+            </span>
+          </div>
+          <p class="text-xs text-slate-400">Система видеоанализа, трекинга траекторий и телеметрии Hawkeye</p>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs (4 Core Modules) -->
+      <div class="flex items-center gap-1.5 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60" id="module-tabs">
+        <button onclick="switchTab('overlay')" id="tab-overlay" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-sky-500 text-slate-950 shadow-md">
+          📹 1. Наложение Slow-Mo & Скелет
+        </button>
+        <button onclick="switchTab('heatmap')" id="tab-heatmap" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
+          🎯 2. Карта зон и ударов
+        </button>
+        <button onclick="switchTab('footwork')" id="tab-footwork" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
+          👟 3. Трекинг движений и сплит
+        </button>
+        <button onclick="switchTab('telemetry')" id="tab-telemetry" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
+          ⚡ 4. Физика полёта и радар
+        </button>
+      </div>
+
+      <!-- Quick Session Indicator & Mode -->
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-400">Сессия:</span>
+        <select id="preset-selector" onchange="onPresetChange(this.value)" class="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-lg px-2.5 py-1 focus:ring-1 focus:ring-sky-500 outline-none">
+          <option value="forehand_fed">Удар справа: Федерер vs Ученик (Topspin Forehand)</option>
+          <option value="serve_alcaraz">Подача: Алькарас vs Ученик (Flat T-Serve)</option>
+          <option value="backhand_djok">Удар слева: Джокович vs Ученик (2H Backhand)</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main App Viewport Container -->
+  <main class="max-w-7xl mx-auto p-4 space-y-4">
+
+    <!-- ========================================================================================= -->
+    <!-- МОДУЛЬ 1: DUAL SLOW-MO & SKELETON OVERLAY STUDIO                                          -->
+    <!-- ========================================================================================= -->
+    <section id="module-overlay-section" class="space-y-3">
+      
+      <!-- Top Control Bar of Module 1 -->
+      <div class="glass-panel rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <!-- View Modes -->
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-slate-400">Режим сравнения:</span>
+          <div class="inline-flex rounded-lg bg-slate-800 p-0.5 border border-slate-700">
+            <button onclick="setOverlayMode('split')" id="mode-split-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Сплит 50/50</button>
+            <button onclick="setOverlayMode('ghost')" id="mode-ghost-btn" class="px-2.5 py-1 rounded-md font-semibold bg-sky-500 text-slate-950 shadow">Ghost-наложение</button>
+            <button onclick="setOverlayMode('curtain')" id="mode-curtain-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Шторка (Curtain)</button>
+          </div>
+        </div>
+
+        <!-- Alpha Blend Slider (For Ghost Overlay) -->
+        <div id="alpha-controls" class="flex items-center gap-2 min-w-[220px]">
+          <span class="text-slate-400">Прозрачность (Профи ⇄ Вы):</span>
+          <input type="range" id="alpha-slider" min="0" max="100" value="50" oninput="onAlphaChange(this.value)" class="w-28 h-1.5" />
+          <span id="alpha-label" class="font-mono text-sky-400 w-8">50%</span>
+        </div>
+
+        <!-- Real Video File Uploaders -->
+        <div class="flex items-center gap-2">
+          <label class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 cursor-pointer text-slate-300 hover:text-white transition flex items-center gap-1.5">
+            <span>📹 Загрузить своё видео</span>
+            <input type="file" id="user-video-input" accept="video/*" class="hidden" onchange="handleUserVideoUpload(event)" />
+          </label>
+          <label class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 cursor-pointer text-slate-300 hover:text-white transition flex items-center gap-1.5">
+            <span>⭐ Загрузить видео профи</span>
+            <input type="file" id="pro-video-input" accept="video/*" class="hidden" onchange="handleProVideoUpload(event)" />
+          </label>
+        </div>
+      </div>
+
+      <!-- Main Video / Canvas Stage -->
+      <div class="grid grid-cols-12 gap-3 items-start">
+        
+        <!-- Left: Interactive High-Precision Canvas (8 cols) -->
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-2">
+          <div class="relative w-full aspect-[16/10] bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
+            
+            <!-- Real HTML5 Video Elements (Hidden or Rendered on Canvas) -->
+            <video id="pro-video-element" class="hidden" playsinline muted loop></video>
+            <video id="user-video-element" class="hidden" playsinline muted loop></video>
+
+            <!-- Composite High-DPI Canvas -->
+            <canvas id="overlay-canvas" width="960" height="600" class="w-full h-full object-contain cursor-crosshair"></canvas>
+
+            <!-- Dynamic Curtain Slider Handle (Shown only in 'curtain' mode) -->
+            <div id="curtain-handle" class="hidden absolute top-0 bottom-0 w-1 bg-amber-400 cursor-ew-resize pointer-events-auto shadow-[0_0_15px_rgba(251,191,36,0.8)]" style="left: 50%;">
+              <div class="absolute top-1/2 -translate-y-1/2 -left-3 w-7 h-7 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center text-xs font-bold shadow-md">
+                ⇄
+              </div>
+            </div>
+
+            <!-- Top Overlay Badges -->
+            <div class="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
+              <span id="badge-pro" class="px-2 py-0.5 rounded bg-amber-500/90 text-slate-950 font-bold text-[11px] shadow">
+                ⭐ РЕФЕРЕНС ATP: РОДЖЕР ФЕДЕРЕР
+              </span>
+              <span id="badge-user" class="px-2 py-0.5 rounded bg-sky-500/90 text-slate-950 font-bold text-[11px] shadow">
+                👤 ВАШ УДАР (СЛОУ-МО 120 FPS)
+              </span>
+            </div>
+
+            <!-- Live Angle Indicator HUD on Canvas -->
+            <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none text-xs">
+              <div class="bg-slate-950/80 backdrop-blur border border-slate-700/60 rounded-lg px-2.5 py-1 font-mono text-slate-300">
+                Фаза: <span id="hud-phase-name" class="text-amber-400 font-bold">T2 — Точка контакта (Contact)</span>
+              </div>
+              <div class="bg-slate-950/80 backdrop-blur border border-slate-700/60 rounded-lg px-2.5 py-1 font-mono text-slate-300">
+                Синхронизация по якорю: <span class="text-emerald-400 font-bold">Locked Δt = 0 мс</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Playback & Timeline Controls -->
+          <div class="glass-panel rounded-xl p-3 flex flex-col gap-2">
+            <!-- Scrubber with 5 Key Biomechanical Anchors -->
+            <div class="relative w-full">
+              <input type="range" id="video-scrubber" min="0" max="1000" value="620" oninput="onVideoScrub(this.value)" class="w-full h-2 cursor-pointer" />
+              <!-- Anchor Tick Marks -->
+              <div class="flex justify-between text-[11px] font-mono text-slate-400 px-1 mt-1">
+                <button onclick="jumpToPhase('T0')" class="hover:text-amber-300">T0: Замах (0%)</button>
+                <button onclick="jumpToPhase('T1')" class="hover:text-amber-300">T1: Опускание головки (40%)</button>
+                <button onclick="jumpToPhase('T2')" class="text-emerald-400 font-bold hover:text-emerald-300">T2: Контакт (62%)</button>
+                <button onclick="jumpToPhase('T3')" class="hover:text-amber-300">T3: Проводка (78%)</button>
+                <button onclick="jumpToPhase('T4')" class="hover:text-amber-300">T4: Рекавери (100%)</button>
+              </div>
+            </div>
+
+            <!-- Play / Pause, Speed & Calibration -->
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800 text-xs">
+              <div class="flex items-center gap-2">
+                <button onclick="toggleVideoPlay()" id="btn-video-play" class="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 font-bold text-slate-950 flex items-center gap-1 shadow">
+                  <span id="video-play-icon">⏸</span>
+                  <span id="video-play-text">Пауза</span>
+                </button>
+                <button onclick="stepFrame(-1)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300">
+                  ⏮ -1 кадр
+                </button>
+                <button onclick="stepFrame(1)" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300">
+                  +1 кадр ⏭
+                </button>
+              </div>
+
+              <!-- Speed Selector (Slow-Mo Focus) -->
+              <div class="flex items-center gap-1.5">
+                <span class="text-slate-400">Скорость:</span>
+                <button onclick="setPlaySpeed(0.1)" class="speed-btn px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white border border-slate-700">0.1x (Супер-слоу)</button>
+                <button onclick="setPlaySpeed(0.25)" class="speed-btn px-2 py-1 rounded bg-sky-500/20 text-sky-400 border border-sky-500/40 font-bold">0.25x</button>
+                <button onclick="setPlaySpeed(0.5)" class="speed-btn px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white border border-slate-700">0.5x</button>
+                <button onclick="setPlaySpeed(1.0)" class="speed-btn px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white border border-slate-700">1.0x</button>
+              </div>
+
+              <!-- Set Contact Anchor Button -->
+              <button onclick="setContactAnchorHere()" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold flex items-center gap-1">
+                📍 Зафиксировать якорь контакта
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: ATP Biomechanics Discrepancy Diagnostics (4 cols) -->
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-2.5">
+          
+          <!-- Summary Score Card -->
+          <div class="glass-panel rounded-xl p-3 border-l-4 border-amber-500">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs uppercase tracking-wider font-bold text-amber-400">Индекс кинематической цепи</span>
+              <span id="biomech-score" class="text-lg font-black font-mono text-amber-400">74 / 100</span>
+            </div>
+            <p class="text-xs text-slate-300 leading-snug">
+              Удар на уровне <span class="text-sky-400 font-semibold">Junior ITF / College D1</span>. Обнаружено 2 критических расхождения с биомеханическим эталоном Федерера в фазе контакта $T_2$.
+            </p>
+          </div>
+
+          <!-- Discrepancy Cards List -->
+          <div class="space-y-2" id="discrepancy-list">
+            
+            <!-- Angle 1: Elbow Extension -->
+            <div class="glass-panel rounded-xl p-3 border border-red-500/40 bg-red-950/20">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="font-bold text-red-300 flex items-center gap-1">
+                  ⚠️ Сгибание локтя бьющей руки
+                </span>
+                <span class="font-mono px-1.5 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">-27° ошибка</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-xs font-mono my-1.5 p-1.5 rounded bg-slate-900/60 border border-slate-800">
+                <div>Профи (ATP): <span class="text-amber-400 font-bold">165°</span> (прямой рычаг)</div>
+                <div>Вы: <span class="text-red-400 font-bold">138°</span> (согнут)</div>
+              </div>
+              <p class="text-[11px] text-slate-300 leading-tight">
+                <strong class="text-white">Что идёт не так:</strong> Согнутый локоть крадёт линейную скорость головки ракетки. Вы толкаете мяч рукой вместо разгона всего плечевого рычага.
+              </p>
+            </div>
+
+            <!-- Angle 2: Knee Flexion / Power Loading -->
+            <div class="glass-panel rounded-xl p-3 border border-amber-500/40 bg-amber-950/20">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="font-bold text-amber-300 flex items-center gap-1">
+                  ⚠️ Подсед и толчок ногами
+                </span>
+                <span class="font-mono px-1.5 py-0.5 rounded bg-amber-500/30 text-amber-200 font-bold">-31° недосед</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-xs font-mono my-1.5 p-1.5 rounded bg-slate-900/60 border border-slate-800">
+                <div>Профи (ATP): <span class="text-amber-400 font-bold">132°</span> (глубокий)</div>
+                <div>Вы: <span class="text-amber-400 font-bold">163°</span> (прямые ноги)</div>
+              </div>
+              <p class="text-[11px] text-slate-300 leading-tight">
+                <strong class="text-white">Что идёт не так:</strong> Удар выполнен исключительно за счёт вращения торса. Вертикальный импульс от ног не передаётся в мяч.
+              </p>
+            </div>
+
+            <!-- Angle 3: Contact Point Offset -->
+            <div class="glass-panel rounded-xl p-3 border border-red-500/40 bg-red-950/20">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="font-bold text-red-300 flex items-center gap-1">
+                  ⚠️ Вынос точки контакта вперёд
+                </span>
+                <span class="font-mono px-1.5 py-0.5 rounded bg-red-500/30 text-red-200 font-bold">Late Contact (-18 см)</span>
+              </div>
+              <p class="text-[11px] text-slate-300 leading-tight">
+                Контакт происходит на одной линии с передним бедром вместо выноса на 30 см вперёд. Мяч летит мягче, возрастает риск травмы локтя («локоть теннисиста»).
+              </p>
+            </div>
+
+            <!-- Angle 4: Wrist Lag -->
+            <div class="glass-panel rounded-xl p-3 border border-emerald-500/40 bg-emerald-950/20">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="font-bold text-emerald-300 flex items-center gap-1">
+                  ✓ Угол кисти (Wrist Lag)
+                </span>
+                <span class="font-mono px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-200 font-bold">72° (Норма)</span>
+              </div>
+              <p class="text-[11px] text-slate-300 leading-tight">
+                Отличное натяжение связок предплечья при опускании ракетки. Хлыстообразный разгон сохранён.
+              </p>
+            </div>
+
+          </div>
+
+          <!-- Coach Recommendation Pill -->
+          <div class="p-3 rounded-xl bg-sky-950/40 border border-sky-500/30 text-xs text-sky-200 leading-relaxed">
+            💡 <strong>Совет тренера ATP:</strong> В фазе $T_1$ сделайте паузу на 50 мс глубже в коленях и выпрямите руку навстречу мячу на 25 см раньше. Это добавит +14 км/ч к скорости удара.
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+    <!-- ========================================================================================= -->
+    <!-- МОДУЛЬ 2: SHOT DISPERSION & ZONE HEATMAP                                                  -->
+    <!-- ========================================================================================= -->
+    <section id="module-heatmap-section" class="hidden space-y-3">
+      
+      <!-- Top Control Bar of Module 2 -->
+      <div class="glass-panel rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-slate-400">Направление серии:</span>
+          <div class="inline-flex rounded-lg bg-slate-800 p-0.5 border border-slate-700" id="shot-filter-group">
+            <button onclick="setShotFilter('cross_fh')" id="flt-cross-fh" class="px-2.5 py-1 rounded-md font-semibold bg-sky-500 text-slate-950">Справа направо (Forehand Cross)</button>
+            <button onclick="setShotFilter('dtl_fh')" id="flt-dtl-fh" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Справа по линии (Forehand DTL)</button>
+            <button onclick="setShotFilter('cross_bh')" id="flt-cross-bh" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Слева налево (Backhand Cross)</button>
+            <button onclick="setShotFilter('all')" id="flt-all" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Все удары (45)</button>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <label class="inline-flex items-center gap-1.5 cursor-pointer text-slate-300">
+            <input type="checkbox" id="chk-show-heat" checked onchange="toggleHeatmapVisuals()" class="accent-sky-400 rounded" />
+            <span>Тепловая карта (Density)</span>
+          </label>
+          <label class="inline-flex items-center gap-1.5 cursor-pointer text-slate-300">
+            <input type="checkbox" id="chk-show-dots" checked onchange="toggleHeatmapVisuals()" class="accent-sky-400 rounded" />
+            <span>Точки приземления</span>
+          </label>
+          <label class="inline-flex items-center gap-1.5 cursor-pointer text-slate-300">
+            <input type="checkbox" id="chk-show-vectors" checked onchange="toggleHeatmapVisuals()" class="accent-sky-400 rounded" />
+            <span>Векторы полёта</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Court & Statistics Layout -->
+      <div class="grid grid-cols-12 gap-3 items-start">
+        <!-- Interactive Hawkeye Tennis Court (8 cols) -->
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-2">
+          <div class="relative w-full rounded-xl overflow-hidden border border-slate-800 shadow-2xl court-bg">
+            <canvas id="heatmap-canvas" width="900" height="460" class="w-full h-auto block cursor-pointer"></canvas>
+            
+            <!-- Court Floating Legend -->
+            <div class="absolute top-2.5 left-3 flex items-center gap-2 pointer-events-none text-xs">
+              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
+                🎯 Зона глубоких ударов (Deep 2m Zone)
+              </span>
+              <span class="px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/40 font-mono">
+                ⚠️ Короткие мячи (< Линии подачи)
+              </span>
+            </div>
+          </div>
+          <p class="text-[11px] text-slate-400 px-1">
+            * Нажмите на любую точку удара на корте, чтобы просмотреть её точную скорость, вращение (RPM) и глубину от задней линии.
+          </p>
+        </div>
+
+        <!-- Shot Analytics Summary Panel (4 cols) -->
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-2.5">
+          
+          <!-- Key Metrics Grid -->
+          <div class="glass-panel rounded-xl p-3 space-y-2.5">
+            <h3 class="text-xs uppercase tracking-wider font-bold text-slate-400">Статистика точности и глубины</h3>
+            
+            <div class="grid grid-cols-2 gap-2 text-center">
+              <div class="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                <div class="text-[11px] text-slate-400">Попадание в корт</div>
+                <div id="stat-in-court" class="text-xl font-black font-mono text-emerald-400">84.4%</div>
+                <div class="text-[10px] text-slate-500">Норма D1: >80%</div>
+              </div>
+              <div class="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                <div class="text-[11px] text-slate-400">Глубокие мячи (2м)</div>
+                <div id="stat-deep-rate" class="text-xl font-black font-mono text-sky-400">57.8%</div>
+                <div class="text-[10px] text-slate-500">Цель ATP: >65%</div>
+              </div>
+              <div class="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                <div class="text-[11px] text-slate-400">Виннеры (Активные)</div>
+                <div id="stat-winners" class="text-xl font-black font-mono text-amber-400">11 ударов</div>
+                <div class="text-[10px] text-slate-500">Ср. скорость: 124 км/ч</div>
+              </div>
+              <div class="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
+                <div class="text-[11px] text-slate-400">Короткие мячи</div>
+                <div id="stat-short-balls" class="text-xl font-black font-mono text-red-400">15.5%</div>
+                <div class="text-[10px] text-slate-500">Атакуемые соперником</div>
+              </div>
+            </div>
+
+            <!-- Error Dispersion Breakdown -->
+            <div class="pt-2 border-t border-slate-800">
+              <div class="text-xs font-semibold text-slate-300 mb-1.5">Структура невынужденных ошибок:</div>
+              <div class="space-y-1 text-xs font-mono">
+                <div class="flex justify-between items-center">
+                  <span class="text-slate-400">Аут по длине (Long Out):</span>
+                  <span class="text-amber-400 font-bold">4 удара (57%)</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-slate-400">Сетка (Net Errors):</span>
+                  <span class="text-red-400 font-bold">2 удара (29%)</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-slate-400">Боковой аут (Wide Out):</span>
+                  <span class="text-slate-400 font-bold">1 удар (14%)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Selected Shot Detail Card -->
+          <div id="selected-shot-card" class="glass-panel rounded-xl p-3 border border-sky-500/40">
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span class="font-bold text-sky-300">Выбранный удар #14</span>
+              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">IN COURT</span>
+            </div>
+            <div class="space-y-1 text-xs text-slate-300">
+              <div>Тип: <strong class="text-white">Forehand Crosscourt (Heavy Topspin)</strong></div>
+              <div>Скорость при вылете: <strong class="text-amber-400">128.5 км/ч</strong> | У сетки: <strong class="text-amber-300">102 км/ч</strong></div>
+              <div>Глубина приземления: <strong class="text-emerald-400">0.82 м от задней линии</strong> (Идеальная глубина)</div>
+              <div>Боковой отступ от линии: <strong class="text-sky-400">0.65 м</strong> (Safety Margin выдержан)</div>
+            </div>
+          </div>
+
+          <!-- Coach Tactical Guidance -->
+          <div class="p-3 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-200 leading-relaxed">
+            🎯 <strong>Тактический вывод:</strong> В серии «справа направо» 58% ваших мячей попадают в глубокую 2-метровую зону. Однако при попытке перевода по линии (DTL) процент ошибок подскакивает до 33%. <em>Рекомендация:</em> держите кросс до получения мяча короче линии подачи!
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ========================================================================================= -->
+    <!-- МОДУЛЬ 3: FOOTWORK & COURT MOVEMENT TRACER                                                -->
+    <!-- ========================================================================================= -->
+    <section id="module-footwork-section" class="hidden space-y-3">
+      
+      <!-- Top Control Bar of Module 3 -->
+      <div class="glass-panel rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-slate-400">Розыгрыш:</span>
+          <select id="rally-selector" onchange="onRallyChange(this.value)" class="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-lg px-2.5 py-1 outline-none">
+            <option value="rally_long">Розыгрыш 7 ударов: Защита в углах ⇄ Атака с хавкорта</option>
+            <option value="rally_serve_volley">Serve & Volley: Выход к сетке после косой подачи</option>
+            <option value="rally_defensive">Оборонительное выбивание за пределы коридора</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button onclick="toggleRallyPlay()" id="btn-rally-play" class="px-3 py-1 rounded-lg bg-sky-500 font-bold text-slate-950 flex items-center gap-1 shadow">
+            <span id="rally-play-icon">⏸</span>
+            <span id="rally-play-text">Пауза симуляции</span>
+          </button>
+          <label class="inline-flex items-center gap-1.5 cursor-pointer text-slate-300">
+            <input type="checkbox" id="chk-optimal-path" checked onchange="drawFootworkFrame()" class="accent-sky-400 rounded" />
+            <span>Оптимальный путь (Геодезический)</span>
+          </label>
+          <label class="inline-flex items-center gap-1.5 cursor-pointer text-slate-300">
+            <input type="checkbox" id="chk-bisection" checked onchange="drawFootworkFrame()" class="accent-sky-400 rounded" />
+            <span>Центр биссектрисы</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Footwork Tracer Stage -->
+      <div class="grid grid-cols-12 gap-3 items-start">
+        <!-- Court Movement Canvas (8 cols) -->
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-2">
+          <div class="relative w-full rounded-xl overflow-hidden border border-slate-800 shadow-2xl court-bg">
+            <canvas id="footwork-canvas" width="900" height="460" class="w-full h-auto block"></canvas>
+
+            <!-- Bottom Footwork HUD Overlay -->
+            <div class="absolute bottom-2.5 left-3 right-3 flex items-center justify-between text-xs pointer-events-none">
+              <div class="bg-slate-950/80 backdrop-blur border border-slate-700 rounded-lg px-2.5 py-1 font-mono text-slate-300">
+                Текущее действие: <span id="fw-hud-action" class="text-amber-400 font-bold">Кросс-овер шаг в угол</span>
+              </div>
+              <div class="bg-slate-950/80 backdrop-blur border border-slate-700 rounded-lg px-2.5 py-1 font-mono text-slate-300">
+                Скорость перемещения: <span id="fw-hud-speed" class="text-sky-400 font-bold">16.4 км/ч</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Movement Scrubber -->
+          <div class="glass-panel rounded-xl p-2.5 flex items-center gap-3 text-xs">
+            <span class="font-mono text-slate-400">Таймлайн розыгрыша:</span>
+            <input type="range" id="rally-scrubber" min="0" max="1000" value="0" oninput="onRallyScrub(this.value)" class="flex-1 h-1.5 cursor-pointer" />
+            <span id="rally-time-label" class="font-mono text-sky-400 w-16">t = 0.0 с</span>
+          </div>
+        </div>
+
+        <!-- Footwork Analytics Panel (4 cols) -->
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-2.5">
+          
+          <!-- Efficiency Score Card -->
+          <div class="glass-panel rounded-xl p-3 border-l-4 border-emerald-500">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs uppercase tracking-wider font-bold text-slate-400">Эффективность перемещений (PEI)</span>
+              <span id="stat-pei-score" class="text-lg font-black font-mono text-emerald-400">82.4%</span>
+            </div>
+            <div class="space-y-1 text-xs text-slate-300 font-mono">
+              <div class="flex justify-between">
+                <span>Фактический пробег:</span>
+                <strong id="stat-dist-actual" class="text-white">38.6 м</strong>
+              </div>
+              <div class="flex justify-between">
+                <span>Оптимальный маршрут:</span>
+                <strong id="stat-dist-optimal" class="text-emerald-400">31.8 м</strong>
+              </div>
+              <div class="flex justify-between">
+                <span>«Лишние метры» (Задержки):</span>
+                <strong id="stat-dist-wasted" class="text-amber-400">+6.8 м (17.6%)</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Split-Step Latency Gauge -->
+          <div class="glass-panel rounded-xl p-3 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-bold text-slate-300">Тайминг сплит-степа</span>
+              <span id="split-badge" class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">
+                +135 мс (ИДЕАЛ)
+              </span>
+            </div>
+
+            <!-- Graphical Timing Scale -->
+            <div class="relative w-full h-7 bg-slate-900 rounded-lg border border-slate-800 overflow-hidden flex items-center text-[10px] font-mono">
+              <div class="w-1/4 h-full bg-amber-500/10 flex items-center justify-center text-amber-500/70 border-r border-slate-800">Ранний (<0)</div>
+              <div class="w-2/4 h-full bg-emerald-500/20 flex items-center justify-center text-emerald-300 font-bold border-r border-slate-800">
+                Окно ATP (+100..+160 мс)
+              </div>
+              <div class="w-1/4 h-full bg-red-500/10 flex items-center justify-center text-red-500/70">Опоздание (>240)</div>
+
+              <!-- Animated Needle Marker -->
+              <div id="split-needle" class="absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_10px_#fff]" style="left: 54%;"></div>
+            </div>
+
+            <p class="text-[11px] text-slate-300 leading-tight">
+              Вы приземляетесь на стопы через <strong class="text-emerald-300">+135 мс</strong> после удара соперника. Мышцы взведены, инерция для взрывного старта сохранена на 100%.
+            </p>
+          </div>
+
+          <!-- Center of Bisection Advice -->
+          <div class="glass-panel rounded-xl p-3 border border-sky-500/30 text-xs space-y-1.5">
+            <div class="font-bold text-sky-300 flex items-center gap-1.5">
+              <span>📐 Позиция возврата (Recovery to Bisection)</span>
+            </div>
+            <p class="text-slate-300 leading-relaxed">
+              После глубокого удара сопернику в угол любители бегут в центр задней линии (центральную метку).
+            </p>
+            <p class="text-amber-200 bg-slate-900/80 p-2 rounded-lg border border-slate-800 leading-snug">
+              ⚠️ <strong>Правило ATP:</strong> Вы обязаны смещаться на <strong>1.1 м левее центра</strong> (на биссектрису возможного кросса соперника). Иначе острый кросс соперника оставит вас без шансов.
+            </p>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ========================================================================================= -->
+    <!-- МОДУЛЬ 4: BALL FLIGHT TELEMETRY & RADAR                                                   -->
+    <!-- ========================================================================================= -->
+    <section id="module-telemetry-section" class="hidden space-y-3">
+      
+      <!-- Interactive Flight Simulator & Radar -->
+      <div class="grid grid-cols-12 gap-3 items-start">
+        
+        <!-- Left: Telemetry Canvas & Radar Gauges (8 cols) -->
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-2.5">
+          <div class="relative w-full rounded-xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-900 p-4">
+            
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-emerald-400 animate-ping"></span>
+                <h3 class="text-sm font-bold text-white tracking-wide uppercase">Hawkeye Radar & Flight Transit Engine</h3>
+              </div>
+              <span class="text-xs font-mono text-slate-400">Формула сопротивления воздуха + Эффект Магнуса</span>
+            </div>
+
+            <!-- Radar & Flight Path Canvas -->
+            <canvas id="telemetry-canvas" width="860" height="380" class="w-full h-auto block"></canvas>
+          </div>
+
+          <!-- Parameter Controls (Speed, Surface, Depth) -->
+          <div class="glass-panel rounded-xl p-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <!-- Slider 1: Launch Ball Speed -->
+            <div class="space-y-1">
+              <div class="flex justify-between">
+                <span class="text-slate-400">Скорость вылета мяча:</span>
+                <span id="val-speed" class="font-mono text-amber-400 font-bold">130 км/ч</span>
+              </div>
+              <input type="range" id="slider-speed" min="80" max="215" value="130" oninput="updateFlightPhysics()" class="w-full h-1.5" />
+              <div class="flex justify-between text-[10px] text-slate-500">
+                <span>80 км/ч (Мягкий)</span>
+                <span>150 (Топспин)</span>
+                <span>215 (Подача)</span>
+              </div>
+            </div>
+
+            <!-- Slider 2: Receiver Court Depth -->
+            <div class="space-y-1">
+              <div class="flex justify-between">
+                <span class="text-slate-400">Позиция принимающего:</span>
+                <span id="val-depth" class="font-mono text-sky-400 font-bold">0.5 м за задней</span>
+              </div>
+              <input type="range" id="slider-depth" min="-1.5" max="4.0" step="0.5" value="0.5" oninput="updateFlightPhysics()" class="w-full h-1.5" />
+              <div class="flex justify-between text-[10px] text-slate-500">
+                <span>-1.5м (В корте)</span>
+                <span>0.0 (Линия)</span>
+                <span>+4.0м (Стиль Медведева)</span>
+              </div>
+            </div>
+
+            <!-- Selector 3: Court Surface -->
+            <div class="space-y-1">
+              <div class="text-slate-400">Покрытие корта:</div>
+              <select id="select-surface" onchange="updateFlightPhysics()" class="w-full bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-lg px-2.5 py-1 outline-none">
+                <option value="hard">Хард (Medium-Fast: -24% скорости)</option>
+                <option value="clay">Грунт (Clay: -31% скорости, высокий отскок)</option>
+                <option value="grass">Трава (Grass: -18% скорости, низкий скользящий)</option>
+              </select>
+              <div class="text-[10px] text-slate-500">Влияет на деселерацию после отскока</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Time Budget & Reaction Window Breakdown (4 cols) -->
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-2.5">
+          
+          <!-- Transit Time Big Gauge -->
+          <div class="glass-panel rounded-xl p-3.5 border-l-4 border-sky-500 text-center space-y-1">
+            <div class="text-xs text-slate-400 uppercase tracking-wider font-semibold">
+              Время полёта: Ракетка ⇄ Ракетка соперника
+            </div>
+            <div id="stat-transit-time" class="text-3xl font-black font-mono text-sky-400">
+              880 мс
+            </div>
+            <div id="stat-transit-sub" class="text-xs text-slate-400">
+              Дистанция полёта: <span class="text-white font-mono font-bold">25.4 метра</span>
+            </div>
+          </div>
+
+          <!-- Time Budget Phased Stack -->
+          <div class="glass-panel rounded-xl p-3 space-y-2">
+            <h4 class="text-xs font-bold text-slate-300">Бюджет времени на реакцию и подготовку:</h4>
+            
+            <div class="space-y-1.5 text-xs font-mono">
+              <!-- Phase 1 -->
+              <div class="p-1.5 rounded bg-slate-900/80 border border-slate-800 flex justify-between items-center">
+                <span class="text-slate-400">1. Распознавание полёта:</span>
+                <span class="text-white font-bold">180 мс</span>
+              </div>
+              <!-- Phase 2 -->
+              <div class="p-1.5 rounded bg-slate-900/80 border border-slate-800 flex justify-between items-center">
+                <span class="text-slate-400">2. Сплит-степ и старт:</span>
+                <span class="text-white font-bold">120 мс</span>
+              </div>
+              <!-- Phase 3 -->
+              <div class="p-1.5 rounded bg-slate-900/80 border border-slate-800 flex justify-between items-center">
+                <span class="text-slate-400">3. Подход ногами (2–3 шага):</span>
+                <span id="time-footwork" class="text-sky-400 font-bold">380 мс</span>
+              </div>
+              <!-- Phase 4 -->
+              <div class="p-1.5 rounded bg-slate-900/80 border border-slate-800 flex justify-between items-center">
+                <span class="text-slate-400">4. Замах и разгон ракетки:</span>
+                <span class="text-amber-400 font-bold">200 мс</span>
+              </div>
+            </div>
+
+            <!-- Safety Margin Bar -->
+            <div class="pt-2 border-t border-slate-800 space-y-1">
+              <div class="flex justify-between text-xs font-semibold">
+                <span>Остаточный резерв времени:</span>
+                <span id="stat-margin-time" class="font-mono text-emerald-400 font-bold">+180 мс (Комфортно)</span>
+              </div>
+              <div class="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                <div id="margin-progress" class="h-full bg-emerald-500 rounded-full" style="width: 75%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alert / Status Banner -->
+          <div id="transit-alert-box" class="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-200 leading-relaxed">
+            🟢 <strong>Статус:</strong> При текущей скорости и глубине у вас есть достаточный резерв времени для полного замаха с глубоким разгоном (Full Takeback).
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- External Script Logic -->
+  <script src="js/app.js"></script>
+</body>
+</html>
