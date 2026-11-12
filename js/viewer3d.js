@@ -193,10 +193,13 @@ function loadVideoFileIntoSlot(file, slot) {
       document.getElementById('badge-pro').innerHTML = `⭐ ВИДЕО ПРОФИ: ${file.name.slice(0, 18)}`;
     } else {
       AppState.overlay.userVideoLoaded = true;
-      document.getElementById('badge-user').innerHTML = `📹 ВАШЕ ВИДЕО (LIVE AI АНАЛИЗ): ${file.name.slice(0, 18)}`;
+      document.getElementById('badge-user').innerHTML = `📹 ВАШЕ ВИДЕО (AI АВТО-ЗУМ): ${file.name.slice(0, 18)}`;
       Viewer3D.cam.zoom = 1.0;
       Viewer3D.cam.panX = 0;
       Viewer3D.cam.panY = 35;
+      if (typeof setOverlayMode === 'function') {
+        setOverlayMode('split');
+      }
       if (window.AIPoseEngine) {
         window.AIPoseEngine.smoothedVideoAnchor.initialized = false;
         window.AIPoseEngine.liveUserPose3D = null;
@@ -249,24 +252,66 @@ function clearUploadedVideos() {
   if (typeof renderAceCueSidebar === 'function') renderAceCueSidebar();
 }
 
-function drawCleanVideoCover(ctx, videoEl, x, y, w, h) {
+function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
   if (!videoEl || videoEl.readyState < 2 || !videoEl.videoWidth) return null;
   const vw = videoEl.videoWidth;
   const vh = videoEl.videoHeight;
-  const scale = Math.min(w / vw, h / vh);
-  const dw = vw * scale;
-  const dh = vh * scale;
-  const dx = x + (w - dw) / 2;
-  const dy = y + (h - dh) / 2;
+  const baseScale = Math.min(w / vw, h / vh);
+
+  // AI Smart Auto-Zoom: When a player is small/distant in a phone video (e.g. torsoLegNormSpan = 0.24),
+  // automatically zoom & center on the player so they fill ~68% of the viewport height (~350px tall)!
+  const activeLock = lock || (window.AIPoseEngine && window.AIPoseEngine.videoLock);
+  let smartZoom = 1.0;
+  let focusNormX = 0.52;
+  let focusNormY = 0.46;
+
+  if (activeLock) {
+    const spanNorm = Math.max(0.16, activeLock.torsoLegNormSpan || 0.25);
+    const unzoomedSpanPx = spanNorm * vh * baseScale;
+    const targetSpanPx = h * 0.43; // Torso+Legs = 43% of viewport height (~220px -> ~350px full player height!)
+    smartZoom = Math.max(1.0, Math.min(2.65, targetSpanPx / Math.max(40, unzoomedSpanPx))) * Viewer3D.cam.zoom;
+    focusNormX = activeLock.hipNormX || 0.54;
+    focusNormY = ((activeLock.shNormY || 0.33) + (activeLock.ankleNormY || 0.58)) * 0.5;
+  }
+
+  const dw = vw * baseScale * smartZoom;
+  const dh = vh * baseScale * smartZoom;
+
+  // Center the zoomed video frame on the player's body inside viewport (x, y, w, h)
+  let dx = (x + w * 0.52) - focusNormX * dw + Viewer3D.cam.panX;
+  let dy = (y + h * 0.52) - focusNormY * dh + (Viewer3D.cam.panY - 35);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+
   ctx.drawImage(videoEl, dx, dy, dw, dh);
-  return { dx, dy, dw, dh };
+
+  // Subtle Hawkeye Radial Spotlight Vignette around the player so the 3D overlay has crystal-clear contrast
+  // against bright gymnasium walls or court backgrounds
+  const playerScreenX = dx + focusNormX * dw;
+  const playerScreenY = dy + focusNormY * dh;
+  const spotRadius = Math.max(w, h) * 0.58;
+  const vig = ctx.createRadialGradient(
+    playerScreenX, playerScreenY, spotRadius * 0.22,
+    playerScreenX, playerScreenY, spotRadius
+  );
+  vig.addColorStop(0, "rgba(7, 11, 18, 0.0)");
+  vig.addColorStop(0.55, "rgba(7, 11, 18, 0.22)");
+  vig.addColorStop(1, "rgba(7, 11, 18, 0.62)");
+  ctx.fillStyle = vig;
+  ctx.fillRect(x, y, w, h);
+
+  ctx.restore();
+  return { dx, dy, dw, dh, smartZoom };
 }
 
 /**
- * Draws the Blue 3D Volumetric Anatomical Mesh, 3D Shoes, Foot Vectors, and Live Joint Angles
- * 1:1 directly onto the detected player in the uploaded video!
+ * Draws a Sleek X-Ray Translucent 3D Shell + High-Contrast Laser Skeleton directly on the video player
+ * so the real person in the video remains 100% visible (zero opaque paint or floating text clutter blocking them!).
  */
-function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.92) {
+function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
   if (!rect || !window.AIPoseEngine || !window.AIPoseEngine.liveUserLandmarks2D) return;
   const lm = window.AIPoseEngine.liveUserLandmarks2D;
   const lock = window.AIPoseEngine.videoLock;
@@ -277,41 +322,32 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.92) {
     y: rect.dy + lm[idx].y * rect.dh
   });
 
-  const playerPxSpan = Math.max(45, (lock.torsoLegNormSpan || 0.28) * rect.dh);
-  const s = Math.max(0.28, Math.min(1.25, playerPxSpan / 215));
+  const playerPxSpan = Math.max(60, (lock.torsoLegNormSpan || 0.25) * rect.dh);
+  const s = Math.max(0.35, Math.min(1.35, playerPxSpan / 220));
 
-  const draw2DVolLimb = (p1, p2, baseRad) => {
+  const drawXRayLimb = (p1, p2, baseRad) => {
     const r = Math.max(2.5, baseRad * s);
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = -dy / len;
-    const ny = dx / len;
-
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    ctx.strokeStyle = theme.wireframe;
-    ctx.lineWidth = r * 2.05;
+    // 1. Translucent X-Ray Glass 3D Volume (lets 80% of the real video arm/leg show right through!)
+    ctx.strokeStyle = "rgba(14, 165, 233, 0.22)";
+    ctx.lineWidth = r * 1.45;
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
 
-    ctx.strokeStyle = theme.main;
-    ctx.lineWidth = r * 1.82;
+    // 2. Crisp Glowing Laser Bone Axis (high contrast, thin so it never hides the body)
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 2.6;
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
 
-    ctx.strokeStyle = theme.highlight;
-    ctx.lineWidth = r * 0.72;
-    ctx.beginPath();
-    ctx.moveTo(p1.x - nx * r * 0.24, p1.y - ny * r * 0.24);
-    ctx.lineTo(p2.x - nx * r * 0.24, p2.y - ny * r * 0.24);
-    ctx.stroke();
-
+    // 3. 3D Cross-section Ring at Mid-Limb
     const midX = (p1.x + p2.x) * 0.5;
     const midY = (p1.y + p2.y) * 0.5;
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
-    ctx.lineWidth = 1.1;
+    const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+    ctx.strokeStyle = "rgba(186, 230, 253, 0.65)";
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.ellipse(midX, midY, r * 0.42, r * 0.92, Math.atan2(dy, dx), 0, Math.PI * 2);
+    ctx.ellipse(midX, midY, r * 0.32, r * 0.72, angle, 0, Math.PI * 2);
     ctx.stroke();
   };
 
@@ -328,31 +364,26 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.92) {
   const pHeelL = pt(29), pHeelR = pt(30);
   const pToeL = pt(31), pToeR = pt(32);
 
-  // 1. 3D Weight Rings & Shoes directly under the video player's feet
+  // 1. 3D Weight Rings & Shoes under the video player's feet
   [
-    { ank: pAnkL, heel: pHeelL, toe: pToeL, w: vm.weightFrontPct, tag: 'Лев' },
-    { ank: pAnkR, heel: pHeelR, toe: pToeR, w: 100 - vm.weightFrontPct, tag: 'Прав' }
-  ].forEach(({ ank, heel, toe, w, tag }) => {
-    const ringR = Math.max(8, (11 + (w / 100) * 18) * s);
-    ctx.fillStyle = theme.glowRing;
+    { ank: pAnkL, heel: pHeelL, toe: pToeL, w: vm.weightFrontPct },
+    { ank: pAnkR, heel: pHeelR, toe: pToeR, w: 100 - vm.weightFrontPct }
+  ].forEach(({ ank, heel, toe, w }) => {
+    const ringR = Math.max(10, (12 + (w / 100) * 16) * s);
+    ctx.fillStyle = "rgba(56, 189, 248, 0.18)";
     ctx.beginPath();
-    ctx.ellipse(ank.x, ank.y + 4 * s, ringR, ringR * 0.48, 0, 0, Math.PI * 2);
+    ctx.ellipse(ank.x, ank.y + 3 * s, ringR, ringR * 0.42, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = theme.accent;
-    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // 3D Shoe Sole Capsule
-    const shoeW = Math.max(4, 12 * s);
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = shoeW + 2;
+    // Crisp Shoe Sole & Toe Orientation Vector
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = Math.max(3, 6 * s);
     ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(heel.x, heel.y); ctx.lineTo(toe.x, toe.y); ctx.stroke();
-    ctx.strokeStyle = theme.shoeColor;
-    ctx.lineWidth = shoeW;
-    ctx.beginPath(); ctx.moveTo(heel.x, heel.y); ctx.lineTo(toe.x, toe.y); ctx.stroke();
 
-    // Toe direction arrow
     const fdx = toe.x - heel.x;
     const fdy = toe.y - heel.y;
     const flen = Math.hypot(fdx, fdy) || 1;
@@ -360,34 +391,23 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.92) {
       ctx,
       toe.x,
       toe.y,
-      toe.x + (fdx / flen) * 22 * s,
-      toe.y + (fdy / flen) * 22 * s,
-      theme.accent,
-      2.0
+      toe.x + (fdx / flen) * 24 * s,
+      toe.y + (fdy / flen) * 24 * s,
+      "#34d399",
+      2.2
     );
-
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 9px monospace";
-    ctx.fillText(`${tag}:${Math.round(w)}%`, ank.x - 18, ank.y + 16 * s + 6);
   });
 
-  // 2. 3D Volumetric Legs on Video Player
-  draw2DVolLimb(pHipL, pKneeL, 14.0);
-  draw2DVolLimb(pKneeL, pAnkL, 10.8);
-  draw2DVolLimb(pHipR, pKneeR, 14.0);
-  draw2DVolLimb(pKneeR, pAnkR, 10.8);
+  // 2. X-Ray 3D Legs & Arms
+  drawXRayLimb(pHipL, pKneeL, 11.5);
+  drawXRayLimb(pKneeL, pAnkL, 8.8);
+  drawXRayLimb(pHipR, pKneeR, 11.5);
+  drawXRayLimb(pKneeR, pAnkR, 8.8);
 
-  // 3. 3D Sculpted Torso, Pelvis & Clavicles on Video Player
-  draw2DVolLimb(pHipL, pHipR, 13.0);
-  const midSh = { x: (pShL.x + pShR.x) * 0.5, y: (pShL.y + pShR.y) * 0.5 };
-  const midHip = { x: (pHipL.x + pHipR.x) * 0.5, y: (pHipL.y + pHipR.y) * 0.5 };
-  const torsoGrad = ctx.createLinearGradient(midSh.x, midSh.y, midHip.x, midHip.y);
-  torsoGrad.addColorStop(0, theme.highlight);
-  torsoGrad.addColorStop(0.55, theme.main);
-  torsoGrad.addColorStop(1, theme.boxFill);
-  ctx.fillStyle = torsoGrad;
-  ctx.strokeStyle = theme.wireframe;
-  ctx.lineWidth = 1.5;
+  // 3. X-Ray Torso Frame (ultra-translucent so player's shirt/torso is 100% visible)
+  ctx.fillStyle = "rgba(14, 165, 233, 0.14)";
+  ctx.strokeStyle = "rgba(125, 211, 252, 0.75)";
+  ctx.lineWidth = 1.8;
   ctx.beginPath();
   ctx.moveTo(pShL.x, pShL.y);
   ctx.lineTo(pShR.x, pShR.y);
@@ -396,74 +416,40 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.92) {
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-  draw2DVolLimb(pShL, pShR, 12.5);
-  draw2DVolLimb(midSh, pHead, 8.0);
 
-  // 4. 3D Volumetric Arms (Both Left and Right!) on Video Player
-  draw2DVolLimb(pShL, pElL, 10.0);
-  draw2DVolLimb(pElL, pWrL, 8.2);
-  draw2DVolLimb(pShR, pElR, 10.0);
-  draw2DVolLimb(pElR, pWrR, 8.2);
+  drawXRayLimb(pShL, pElL, 8.5);
+  drawXRayLimb(pElL, pWrL, 7.0);
+  drawXRayLimb(pShR, pElR, 8.5);
+  drawXRayLimb(pElR, pWrR, 7.0);
 
-  // 5. 3D Shaded Joint Spheres on Video Player
+  // 4. Crisp Glowing Joint Rings
   [pShL, pShR, pElL, pElR, pWrL, pWrR, pHipL, pHipR, pKneeL, pKneeR, pAnkL, pAnkR].forEach(j => {
-    const jr = Math.max(2.8, 5.8 * s);
-    const jGrad = ctx.createRadialGradient(j.x - jr * 0.3, j.y - jr * 0.3, 0.5, j.x, j.y, jr);
-    jGrad.addColorStop(0, "#ffffff");
-    jGrad.addColorStop(0.5, theme.accent);
-    jGrad.addColorStop(1, theme.main);
-    ctx.fillStyle = jGrad;
+    const jr = Math.max(3, 4.5 * s);
+    ctx.fillStyle = "#0ea5e9";
     ctx.beginPath();
     ctx.arc(j.x, j.y, jr, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
   });
 
-  // 6. 3D Sculpted Head Sphere & Visor on Video Player
-  const headR = Math.max(6, 16.5 * s);
-  const headGrad = ctx.createRadialGradient(pHead.x - 3 * s, pHead.y - 4 * s, 1, pHead.x, pHead.y, headR);
-  headGrad.addColorStop(0, "#ffffff");
-  headGrad.addColorStop(0.35, theme.highlight);
-  headGrad.addColorStop(1, theme.main);
-  ctx.fillStyle = headGrad;
+  // 5. Sleek X-Ray Head Ring (doesn't cover the player's face!)
+  const headR = Math.max(8, 13.5 * s);
+  ctx.strokeStyle = "#38bdf8";
+  ctx.lineWidth = 2.0;
   ctx.beginPath();
   ctx.arc(pHead.x, pHead.y, headR, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 1.4;
   ctx.stroke();
-
-  ctx.fillStyle = theme.accent;
-  ctx.font = "bold 11px sans-serif";
-  ctx.fillText("👤 Вы (1:1 Видео)", pHead.x - 42, pHead.y - headR - 8);
-
-  // 7. Live Biomechanical Angle Callouts on Knee and Active Elbow
-  const pKnee = pKneeR.y > pKneeL.y ? pKneeR : pKneeL;
-  const pElbow = Math.abs(pWrL.x - midSh.x) > Math.abs(pWrR.x - midSh.x) ? pElL : pElR;
-
-  ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
-  ctx.fillRect(pKnee.x + 10, pKnee.y - 10, 96, 19);
-  ctx.strokeStyle = "#34d399";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(pKnee.x + 10, pKnee.y - 10, 96, 19);
-  ctx.fillStyle = "#34d399";
-  ctx.font = "bold 10px monospace";
-  ctx.fillText(`Колено: ${vm.kneeAngleDeg}°`, pKnee.x + 14, pKnee.y + 3);
-
-  ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
-  ctx.fillRect(pElbow.x + 10, pElbow.y - 10, 96, 19);
-  ctx.strokeStyle = "#38bdf8";
-  ctx.strokeRect(pElbow.x + 10, pElbow.y - 10, 96, 19);
-  ctx.fillStyle = "#38bdf8";
-  ctx.fillText(`Локоть: ${vm.elbowAngleDeg}°`, pElbow.x + 14, pElbow.y + 3);
 
   ctx.restore();
 }
 
 /**
  * Analytically solves for the exact (cx, cy, scale) so the Pro 3D Ghost:
- * - Has the EXACT same shoulder-to-ankle pixel height as the player in the video,
- * - Stands on the EXACT same floor line (ankles Y) as the player in the video,
- * - Aligns horizontally (pelvis X) with the player in the video!
+ * - Has the EXACT same shoulder-to-ankle pixel height as the player in the zoomed video,
+ * - Stands on the EXACT same floor line (ankles Y) as the player in the zoomed video,
+ * - Aligns horizontally (pelvis X) with the player in the zoomed video!
  */
 function computeLockedProTransform(proPose, vidRect, lock, proCam) {
   const uShL = project3D(proPose.shL, 0, 0, 1, proCam);
@@ -476,11 +462,11 @@ function computeLockedProTransform(proPose, vidRect, lock, proCam) {
   const uAnkY = (uAnkL.y + uAnkR.y) * 0.5;
   const unitSpanY = Math.max(0.45, Math.abs(uAnkY - uShY));
 
-  const playerPxSpan = Math.max(48, (lock.torsoLegNormSpan || 0.28) * vidRect.dh);
-  const proScale = (playerPxSpan / unitSpanY) * Viewer3D.cam.zoom;
+  const playerPxSpan = Math.max(60, (lock.torsoLegNormSpan || 0.25) * vidRect.dh);
+  const proScale = playerPxSpan / unitSpanY;
 
-  const targetHipX = vidRect.dx + lock.hipNormX * vidRect.dw + Viewer3D.cam.panX;
-  const targetAnkleY = vidRect.dy + lock.ankleNormY * vidRect.dh + (Viewer3D.cam.panY - 35);
+  const targetHipX = vidRect.dx + lock.hipNormX * vidRect.dw;
+  const targetAnkleY = vidRect.dy + lock.ankleNormY * vidRect.dh;
 
   const proCX = targetHipX - proScale * uHip.x;
   const proCY = targetAnkleY - proScale * uAnkY;
@@ -648,64 +634,53 @@ function draw2DArrow(ctx, x1, y1, x2, y2, color, width) {
 }
 
 /**
- * Draw a 100% Outward-Capped, Volumetric 3D Shaded Limb Segment.
- * Uses multi-pass round-capped 3D strokes + specular highlight core so there are NEVER concave holes at joints!
+ * Draw a Sleek, X-Ray Holographic 3D Shaded Limb Segment.
+ * Uses a translucent 3D glass muscle envelope + crisp bright core bone axis so it NEVER obscures the video player!
  */
 function drawFluid3DLimb(ctx, ptA3D, ptB3D, radiusPx, cx, cy, scale, theme, camOverride) {
   const p1 = project3D(ptA3D, cx, cy, scale, camOverride);
   const p2 = project3D(ptB3D, cx, cy, scale, camOverride);
 
-  const rAvg = Math.max(3, radiusPx * ((p1.s + p2.s) * 0.5));
+  const rAvg = Math.max(2.5, radiusPx * ((p1.s + p2.s) * 0.5));
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len;
-  const ny = dx / len;
 
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // 1. Outer Rim Contour Glow
-  ctx.strokeStyle = theme.wireframe;
-  ctx.lineWidth = rAvg * 2.05;
-  ctx.beginPath();
-  ctx.moveTo(p1.x, p1.y);
-  ctx.lineTo(p2.x, p2.y);
-  ctx.stroke();
-
-  // 2. Main Shaded Anatomical Muscle Volume
+  // 1. Translucent 3D X-Ray Muscle Volume (lets video behind show right through!)
   ctx.strokeStyle = theme.main;
-  ctx.lineWidth = rAvg * 1.85;
+  ctx.lineWidth = rAvg * 1.35;
   ctx.beginPath();
   ctx.moveTo(p1.x, p1.y);
   ctx.lineTo(p2.x, p2.y);
   ctx.stroke();
 
-  // 3. 3D Specular Highlight Ridge (offset slightly towards light source)
+  // 2. Crisp Glowing 3D Bone / Axis Core (high visibility, zero visual clutter)
   ctx.strokeStyle = theme.highlight;
-  ctx.lineWidth = rAvg * 0.72;
+  ctx.lineWidth = Math.max(2.2, rAvg * 0.36);
   ctx.beginPath();
-  ctx.moveTo(p1.x - nx * rAvg * 0.25, p1.y - ny * rAvg * 0.25);
-  ctx.lineTo(p2.x - nx * rAvg * 0.25, p2.y - ny * rAvg * 0.25);
+  ctx.moveTo(p1.x, p1.y);
+  ctx.lineTo(p2.x, p2.y);
   ctx.stroke();
 
-  // 4. Subtle 3D Cross-Section Contour Ring at Limb Midpoint
+  // 3. Subtle 3D Cross-Section Contour Ring at Limb Midpoint
   const midX = (p1.x + p2.x) / 2;
   const midY = (p1.y + p2.y) / 2;
   const limbAngle = Math.atan2(dy, dx);
-  const zTilt = Math.max(0.24, Math.min(0.62, Math.abs(ptB3D[2] - ptA3D[2]) * 1.3 + 0.28));
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
-  ctx.lineWidth = 1.2;
+  const zTilt = Math.max(0.24, Math.min(0.58, Math.abs(ptB3D[2] - ptA3D[2]) * 1.2 + 0.26));
+  ctx.strokeStyle = theme.wireframe;
+  ctx.lineWidth = 1.1;
   ctx.beginPath();
-  ctx.ellipse(midX, midY, rAvg * zTilt, rAvg * 0.94, limbAngle, 0, Math.PI * 2);
+  ctx.ellipse(midX, midY, rAvg * zTilt * 0.72, rAvg * 0.68, limbAngle, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.restore();
 }
 
 /**
- * Draw Sculpted 3D Anatomical Torso, Spine, Shoulder Girdle & Pelvis (Organic & Fluid, Zero Tin-Can Cylinders)
+ * Draw Sleek X-Ray 3D Anatomical Torso, Spine, Shoulder Girdle & Pelvis
  */
 function drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverride) {
   ctx.save();
@@ -714,15 +689,15 @@ function drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverri
 
   const midSh3D = [
     (pose.shL[0] + pose.shR[0]) / 2,
-    (pose.shL[1] + pose.shL[1]) / 2,
+    (pose.shL[1] + pose.shR[1]) / 2,
     (pose.shL[2] + pose.shR[2]) / 2
   ];
   const midHip3D = pose.pelvisPos;
 
-  // 1. Sculpted 3D Pelvis / Hip Girdle Capsule
-  drawFluid3DLimb(ctx, pose.hipL, pose.hipR, 14.5, cx, cy, scale, theme, camOverride);
+  // 1. Sleek 3D Pelvis / Hip Girdle
+  drawFluid3DLimb(ctx, pose.hipL, pose.hipR, 10.5, cx, cy, scale, theme, camOverride);
 
-  // 2. Sculpted 3D Thoracic / Lat / Oblique Volume (Smooth V-Taper)
+  // 2. Translucent X-Ray Thoracic V-Taper
   const midSh = { x: (P.shL.x + P.shR.x) / 2, y: (P.shL.y + P.shR.y) / 2 };
   const midHip = { x: (P.hipL.x + P.hipR.x) / 2, y: (P.hipL.y + P.hipR.y) / 2 };
   const waistL = {
@@ -734,44 +709,40 @@ function drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverri
     y: P.shR.y * 0.45 + P.hipR.y * 0.55
   };
 
-  const torsoGrad = ctx.createLinearGradient(midSh.x, midSh.y, midHip.x, midHip.y);
-  torsoGrad.addColorStop(0, theme.highlight);
-  torsoGrad.addColorStop(0.55, theme.main);
-  torsoGrad.addColorStop(1, theme.boxFill);
-
-  ctx.fillStyle = torsoGrad;
+  ctx.fillStyle = theme.boxFill;
   ctx.strokeStyle = theme.wireframe;
   ctx.lineWidth = 1.6;
   ctx.beginPath();
   ctx.moveTo(P.shL.x, P.shL.y);
-  ctx.quadraticCurveTo(midSh.x, midSh.y - 5 * P.shL.s, P.shR.x, P.shR.y);
+  ctx.quadraticCurveTo(midSh.x, midSh.y - 4 * P.shL.s, P.shR.x, P.shR.y);
   ctx.quadraticCurveTo(waistR.x, waistR.y, P.hipR.x, P.hipR.y);
-  ctx.quadraticCurveTo(midHip.x, midHip.y + 8 * P.hipR.s, P.hipL.x, P.hipL.y);
+  ctx.quadraticCurveTo(midHip.x, midHip.y + 6 * P.hipR.s, P.hipL.x, P.hipL.y);
   ctx.quadraticCurveTo(waistL.x, waistL.y, P.shL.x, P.shL.y);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // 3. Sculpted 3D Clavicle / Shoulder Girdle Capsule
-  drawFluid3DLimb(ctx, pose.shL, pose.shR, 13.5, cx, cy, scale, theme, camOverride);
+  // 3. Sleek 3D Clavicle / Shoulder Girdle
+  drawFluid3DLimb(ctx, pose.shL, pose.shR, 10.0, cx, cy, scale, theme, camOverride);
 
-  // 4. 3D Articulated Spine Column (Lumbar -> Thoracic -> Cervical -> Head)
-  for (let i = 1; i <= 4; i++) {
-    const f = i / 5;
+  // 4. 3D Articulated Spine Axis
+  drawFluid3DLimb(ctx, midHip3D, midSh3D, 6.0, cx, cy, scale, theme, camOverride);
+  for (let i = 1; i <= 3; i++) {
+    const f = i / 4;
     const sp3D = [
       midHip3D[0] + (midSh3D[0] - midHip3D[0]) * f,
       midHip3D[1] + (midSh3D[1] - midHip3D[1]) * f,
       midHip3D[2] + (midSh3D[2] - midHip3D[2]) * f
     ];
     const sp2D = project3D(sp3D, cx, cy, scale, camOverride);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
     ctx.beginPath();
-    ctx.arc(sp2D.x, sp2D.y, 3.2 * sp2D.s, 0, Math.PI * 2);
+    ctx.arc(sp2D.x, sp2D.y, 2.5 * sp2D.s, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // 5. Sculpted 3D Neck connecting Chest to Head
-  drawFluid3DLimb(ctx, midSh3D, pose.head, 8.5, cx, cy, scale, theme, camOverride);
+  // 5. Sleek 3D Neck connecting Chest to Head
+  drawFluid3DLimb(ctx, midSh3D, pose.head, 6.5, cx, cy, scale, theme, camOverride);
 
   ctx.restore();
 }
@@ -789,10 +760,9 @@ function drawFluid3DShoe(ctx, foot, nextFoot, cx, cy, scale, theme, camOverride)
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // Rounded 3D Shoe Sole Base (Heel to Toe)
-  const shoeWidth = Math.max(5, 13.5 * pToe.s);
+  const shoeWidth = Math.max(4, 9.5 * pToe.s);
   ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = shoeWidth + 2.5;
+  ctx.lineWidth = shoeWidth + 1.8;
   ctx.beginPath();
   ctx.moveTo(pHeel.x, pHeel.y);
   ctx.lineTo(pToe.x, pToe.y);
@@ -805,85 +775,21 @@ function drawFluid3DShoe(ctx, foot, nextFoot, cx, cy, scale, theme, camOverride)
   ctx.lineTo(pToe.x, pToe.y);
   ctx.stroke();
 
-  // Upper Shoe Bridge from Ankle to Forefoot
-  ctx.strokeStyle = theme.highlight;
-  ctx.lineWidth = shoeWidth * 0.68;
-  ctx.beginPath();
-  ctx.moveTo(pAnkle.x, pAnkle.y);
-  ctx.lineTo((pHeel.x + pToe.x * 2) / 3, (pHeel.y + pToe.y * 2) / 3);
-  ctx.stroke();
-
   if (Viewer3D.layers.feetAndSteps) {
-    // 1. Toe Facing Orientation Vector
     const toeDir3D = [
-      foot.toe[0] + Math.sin(yawRad) * 0.22,
+      foot.toe[0] + Math.sin(yawRad) * 0.20,
       foot.toe[1] + 0.01,
-      foot.toe[2] + Math.cos(yawRad) * 0.22
+      foot.toe[2] + Math.cos(yawRad) * 0.20
     ];
     const pToeEnd = project3D(toeDir3D, cx, cy, scale, camOverride);
-    draw2DArrow(ctx, pToe.x, pToe.y, pToeEnd.x, pToeEnd.y, theme.accent, 2.3);
-
-    // 2. Instantaneous 3D Foot Movement Velocity Vector
-    if (nextFoot) {
-      const vx = (nextFoot.ankle[0] - foot.ankle[0]) * 3.0;
-      const vy = (nextFoot.ankle[1] - foot.ankle[1]) * 3.0;
-      const vz = (nextFoot.ankle[2] - foot.ankle[2]) * 3.0;
-      if (Math.hypot(vx, vy, vz) > 0.04) {
-        const pVelEnd = project3D([
-          foot.ankle[0] + vx,
-          Math.max(0.02, foot.ankle[1] + vy),
-          foot.ankle[2] + vz
-        ], cx, cy, scale, camOverride);
-        draw2DArrow(ctx, pAnkle.x, pAnkle.y, pVelEnd.x, pVelEnd.y, "#34d399", 2.6);
-      }
-    }
+    draw2DArrow(ctx, pToe.x, pToe.y, pToeEnd.x, pToeEnd.y, theme.accent, 2.0);
   }
 
   ctx.restore();
 }
 
 /**
- * Draw Silky-Smooth Comet Motion Trails for Feet & Wrist/Racket over the past 0.22 seconds
- */
-function drawFluidCometTrails(ctx, keyframes, tNow, cx, cy, scale, theme, camOverride) {
-  if (window.AIPoseEngine && !window.AIPoseEngine.showMotionStrobe) return;
-
-  ctx.save();
-  const steps = 14;
-  const trailSpan = 0.22;
-
-  ['footR', 'footL', 'wrR'].forEach((partKey) => {
-    for (let i = 0; i < steps; i++) {
-      const t0 = Math.max(0, tNow - trailSpan * (1 - i / steps));
-      const t1 = Math.max(0, tNow - trailSpan * (1 - (i + 1) / steps));
-      if (t1 <= t0) continue;
-
-      const pose0 = interpolate3DPose(keyframes, t0);
-      const pose1 = interpolate3DPose(keyframes, t1);
-
-      const pt0 = partKey === 'wrR' ? pose0.wrR : [pose0[partKey].ankle[0], 0.02, pose0[partKey].ankle[2]];
-      const pt1 = partKey === 'wrR' ? pose1.wrR : [pose1[partKey].ankle[0], 0.02, pose1[partKey].ankle[2]];
-
-      const p0 = project3D(pt0, cx, cy, scale, camOverride);
-      const p1 = project3D(pt1, cx, cy, scale, camOverride);
-
-      const frac = (i + 1) / steps;
-      ctx.strokeStyle = theme.accent;
-      ctx.globalAlpha = frac * 0.55;
-      ctx.lineWidth = (partKey === 'wrR' ? 5.5 : 4.5) * frac;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(p0.x, p0.y);
-      ctx.lineTo(p1.x, p1.y);
-      ctx.stroke();
-    }
-  });
-
-  ctx.restore();
-}
-
-/**
- * Draw Complete Fluid 3D Volumetric Athlete (with Both Arms, Head, Visor, Racket & Shoes)
+ * Draw Complete Sleek 3D Volumetric Athlete (Zero Visual Clutter or Text Blocking the Body!)
  */
 function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alpha, camOverride) {
   ctx.save();
@@ -892,70 +798,42 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   const tNow = pose._phaseT !== undefined ? pose._phaseT : AppState.overlay.progress;
   const nextPose = interpolate3DPose(keyframes, Math.min(1.0, tNow + 0.06));
 
-  // 0. FLUID COMET TRAILS
-  drawFluidCometTrails(ctx, keyframes, tNow, cx, cy, scale, theme, camOverride);
-
-  // 1. FOOTWORK SPLINE PATHS & WEIGHT AURAS ON FLOOR
+  // 1. SUBTLE WEIGHT RINGS ON FLOOR (No text clutter on the feet!)
   if (Viewer3D.layers.feetAndSteps) {
-    ['footR', 'footL'].forEach((fKey) => {
-      ctx.beginPath();
-      for (let s = 0; s <= 24; s++) {
-        const kfPose = interpolate3DPose(keyframes, s / 24);
-        const pt = project3D([kfPose[fKey].ankle[0], 0.015, kfPose[fKey].ankle[2]], cx, cy, scale, camOverride);
-        if (s === 0) ctx.moveTo(pt.x, pt.y);
-        else ctx.lineTo(pt.x, pt.y);
-      }
-      ctx.strokeStyle = theme.footTrail;
-      ctx.lineWidth = 2.4;
-      ctx.setLineDash([5, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    });
-
     [
-      { f: pose.footR, w: pose.weightR, tag: 'Прав' },
-      { f: pose.footL, w: pose.weightL, tag: 'Лев' }
-    ].forEach(({ f, w, tag }) => {
+      { f: pose.footR, w: pose.weightR },
+      { f: pose.footL, w: pose.weightL }
+    ].forEach(({ f, w }) => {
       const groundPt = project3D([f.ankle[0], 0.01, f.ankle[2]], cx, cy, scale, camOverride);
-      const ringRadius = (12 + (w / 100) * 22) * groundPt.s;
+      const ringRadius = Math.max(8, (10 + (w / 100) * 16) * groundPt.s);
       ctx.fillStyle = theme.glowRing;
       ctx.beginPath();
-      ctx.ellipse(groundPt.x, groundPt.y, ringRadius, ringRadius * 0.52, 0, 0, Math.PI * 2);
+      ctx.ellipse(groundPt.x, groundPt.y, ringRadius, ringRadius * 0.45, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = theme.accent;
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1.3;
       ctx.stroke();
-
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 10px monospace";
-      ctx.fillText(`${tag}:${Math.round(w)}%`, groundPt.x - 22, groundPt.y + 18);
     });
   }
 
-  // 2. SMOOTH 3D SWING PATH RIBBON
+  // 2. CLEAN RACKET COMET ARC (Only trailing the past 0.18s — NEVER a giant filled sail across the body!)
   if (Viewer3D.layers.swingRibbon) {
     ctx.save();
-    for (let s = 0; s < 32; s++) {
-      const t0 = s / 32;
-      const t1 = (s + 1) / 32;
+    const steps = 12;
+    const span = 0.18;
+    for (let s = 0; s < steps; s++) {
+      const t0 = Math.max(0, tNow - span * (1 - s / steps));
+      const t1 = Math.max(0, tNow - span * (1 - (s + 1) / steps));
+      if (t1 <= t0) continue;
       const sp0 = interpolate3DPose(keyframes, t0);
       const sp1 = interpolate3DPose(keyframes, t1);
       const tip0 = project3D(sp0.rTip, cx, cy, scale, camOverride);
       const tip1 = project3D(sp1.rTip, cx, cy, scale, camOverride);
-      const wr0 = project3D(sp0.wrR, cx, cy, scale, camOverride);
-      const wr1 = project3D(sp1.wrR, cx, cy, scale, camOverride);
 
-      ctx.fillStyle = theme.ribbonFill;
-      ctx.beginPath();
-      ctx.moveTo(tip0.x, tip0.y);
-      ctx.lineTo(tip1.x, tip1.y);
-      ctx.lineTo(wr1.x, wr1.y);
-      ctx.lineTo(wr0.x, wr0.y);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = theme.ribbon;
-      ctx.lineWidth = 3.2;
+      const frac = (s + 1) / steps;
+      ctx.strokeStyle = theme.accent;
+      ctx.globalAlpha = alpha * frac * 0.65;
+      ctx.lineWidth = 3.2 * frac;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(tip0.x, tip0.y);
@@ -991,91 +869,58 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   drawFluid3DShoe(ctx, pose.footR, nextPose.footR, cx, cy, scale, theme, camOverride);
   drawFluid3DShoe(ctx, pose.footL, nextPose.footL, cx, cy, scale, theme, camOverride);
 
-  // 4. FLUID 3D LEGS (Outward-capped organic muscle segments)
+  // 4. SLEEK 3D LEGS
   const legs = [
     { z: (P.hipR.z + P.kneeR.z) / 2, fn: () => {
-      drawFluid3DLimb(ctx, pose.hipR, pose.kneeR, 14.5, cx, cy, scale, theme, camOverride);
-      drawFluid3DLimb(ctx, pose.kneeR, pose.footR.ankle, 11.2, cx, cy, scale, theme, camOverride);
+      drawFluid3DLimb(ctx, pose.hipR, pose.kneeR, 11.2, cx, cy, scale, theme, camOverride);
+      drawFluid3DLimb(ctx, pose.kneeR, pose.footR.ankle, 8.8, cx, cy, scale, theme, camOverride);
     }},
     { z: (P.hipL.z + P.kneeL.z) / 2, fn: () => {
-      drawFluid3DLimb(ctx, pose.hipL, pose.kneeL, 14.5, cx, cy, scale, theme, camOverride);
-      drawFluid3DLimb(ctx, pose.kneeL, pose.footL.ankle, 11.2, cx, cy, scale, theme, camOverride);
+      drawFluid3DLimb(ctx, pose.hipL, pose.kneeL, 11.2, cx, cy, scale, theme, camOverride);
+      drawFluid3DLimb(ctx, pose.kneeL, pose.footL.ankle, 8.8, cx, cy, scale, theme, camOverride);
     }}
   ];
   legs.sort((a, b) => a.z - b.z).forEach(l => l.fn());
 
-  // 5. FLUID SCULPTED 3D TORSO, SPINE, CLAVICLES & PELVIS
+  // 5. SLEEK 3D TORSO, SPINE, CLAVICLES & PELVIS
   drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverride);
 
-  // 6. PELVIS & SHOULDER 3D DIRECTION ARROWS (X-Factor Vectors)
-  if (Viewer3D.layers.directionVectors) {
-    const pelRad = (pose.pelvisYaw * Math.PI) / 180;
-    const pelEnd3D = [
-      pose.pelvisPos[0] + Math.sin(pelRad) * 0.42,
-      pose.pelvisPos[1],
-      pose.pelvisPos[2] + Math.cos(pelRad) * 0.42
-    ];
-    const pS = project3D(pose.pelvisPos, cx, cy, scale, camOverride);
-    const pE = project3D(pelEnd3D, cx, cy, scale, camOverride);
-    draw2DArrow(ctx, pS.x, pS.y, pE.x, pE.y, theme.accent, 2.5);
+  // 6. SLEEK 3D ARMS (Both Left and Right Arms!)
+  drawFluid3DLimb(ctx, pose.shL, pose.elL, 8.2, cx, cy, scale, theme, camOverride);
+  drawFluid3DLimb(ctx, pose.elL, pose.wrL, 6.8, cx, cy, scale, theme, camOverride);
+  drawFluid3DLimb(ctx, pose.shR, pose.elR, 8.5, cx, cy, scale, theme, camOverride);
+  drawFluid3DLimb(ctx, pose.elR, pose.wrR, 7.0, cx, cy, scale, theme, camOverride);
 
-    const chRad = (pose.chestYaw * Math.PI) / 180;
-    const chStart3D = [
-      (pose.shR[0] + pose.shL[0]) / 2,
-      (pose.shR[1] + pose.shL[1]) / 2,
-      (pose.shR[2] + pose.shL[2]) / 2
-    ];
-    const chEnd3D = [
-      chStart3D[0] + Math.sin(chRad) * 0.46,
-      chStart3D[1],
-      chStart3D[2] + Math.cos(chRad) * 0.46
-    ];
-    const cS = project3D(chStart3D, cx, cy, scale, camOverride);
-    const cE = project3D(chEnd3D, cx, cy, scale, camOverride);
-    draw2DArrow(ctx, cS.x, cS.y, cE.x, cE.y, "#ffffff", 2.5);
-  }
-
-  // 7. FLUID 3D ARMS (Both Left and Right Arms!)
-  drawFluid3DLimb(ctx, pose.shL, pose.elL, 10.2, cx, cy, scale, theme, camOverride);
-  drawFluid3DLimb(ctx, pose.elL, pose.wrL, 8.4, cx, cy, scale, theme, camOverride);
-  drawFluid3DLimb(ctx, pose.shR, pose.elR, 10.6, cx, cy, scale, theme, camOverride);
-  drawFluid3DLimb(ctx, pose.elR, pose.wrR, 8.8, cx, cy, scale, theme, camOverride);
-
-  // 8. 3D SHADED JOINT SPHERES
+  // 7. CRISP 3D JOINT SPHERES
   [P.shR, P.shL, P.elR, P.wrR, P.elL, P.wrL, P.hipR, P.hipL, P.kneeR, P.kneeL, P.ankleR, P.ankleL].forEach(j => {
-    const jr = Math.max(3, 6.2 * j.s);
-    const jGrad = ctx.createRadialGradient(j.x - jr * 0.3, j.y - jr * 0.3, 1, j.x, j.y, jr);
-    jGrad.addColorStop(0, "#ffffff");
-    jGrad.addColorStop(0.5, theme.accent);
-    jGrad.addColorStop(1, theme.main);
-    ctx.fillStyle = jGrad;
+    const jr = Math.max(2.8, 4.8 * j.s);
+    ctx.fillStyle = theme.accent;
     ctx.beginPath();
     ctx.arc(j.x, j.y, jr, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
   });
 
-  // 9. SCULPTED 3D HEAD SPHERE WITH ATHLETIC VISOR & GAZE DIRECTION
-  const headR = Math.max(6, 17.5 * P.head.s);
-  const headGrad = ctx.createRadialGradient(P.head.x - 4, P.head.y - 5, 2, P.head.x, P.head.y, headR);
-  headGrad.addColorStop(0, "#ffffff");
-  headGrad.addColorStop(0.35, theme.highlight);
-  headGrad.addColorStop(1, theme.main);
-  ctx.fillStyle = headGrad;
+  // 8. SLEEK X-RAY 3D HEAD SPHERE WITH ATHLETIC VISOR
+  const headR = Math.max(6, 14.5 * P.head.s);
+  ctx.fillStyle = theme.boxFill;
   ctx.beginPath();
   ctx.arc(P.head.x, P.head.y, headR, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = theme.highlight;
+  ctx.lineWidth = 2.0;
   ctx.stroke();
 
   // Athletic Headband / Visor
   ctx.strokeStyle = theme.accent;
-  ctx.lineWidth = 3.5;
+  ctx.lineWidth = 2.8;
   ctx.beginPath();
-  ctx.arc(P.head.x, P.head.y - 2, headR * 0.95, -0.25, Math.PI + 0.25, true);
+  ctx.arc(P.head.x, P.head.y - 2, headR * 0.92, -0.25, Math.PI + 0.25, true);
   ctx.stroke();
 
-  // 10. 3D TENNIS RACKET & STRING BED
+  // 9. 3D TENNIS RACKET & STRING BED
   const throat3D = [
     pose.wrR[0] + (pose.rTip[0] - pose.wrR[0]) * 0.38,
     pose.wrR[1] + (pose.rTip[1] - pose.wrR[1]) * 0.38,
@@ -1090,7 +935,7 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   const PHoop = project3D(centerHoop3D, cx, cy, scale, camOverride);
 
   ctx.strokeStyle = "#f8fafc";
-  ctx.lineWidth = Math.max(2, 4.2 * P.wrR.s);
+  ctx.lineWidth = Math.max(2, 3.4 * P.wrR.s);
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.moveTo(P.wrR.x, P.wrR.y);
@@ -1104,50 +949,74 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   ctx.rotate(rAngle);
   ctx.fillStyle = theme.racketStrings;
   ctx.strokeStyle = theme.accent;
-  ctx.lineWidth = 3.0;
-  const rx = Math.max(8, rLen);
-  const ry = Math.max(6, 15 * PHoop.s);
+  ctx.lineWidth = 2.4;
+  const rx = Math.max(7, rLen);
+  const ry = Math.max(5, 12.5 * PHoop.s);
   ctx.beginPath();
   ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
   ctx.restore();
 
-  if (Viewer3D.layers.directionVectors && pose.rFaceNormal) {
-    const normEnd3D = [
-      centerHoop3D[0] + pose.rFaceNormal[0] * 0.26,
-      centerHoop3D[1] + pose.rFaceNormal[1] * 0.26,
-      centerHoop3D[2] + pose.rFaceNormal[2] * 0.26
-    ];
-    const normEnd2D = project3D(normEnd3D, cx, cy, scale, camOverride);
-    draw2DArrow(ctx, PHoop.x, PHoop.y, normEnd2D.x, normEnd2D.y, "#bef264", 2.2);
-  }
-
-  // 11. 3D TENNIS BALL & FLOOR SHADOW
+  // 10. 3D TENNIS BALL
   if (pose.ball) {
     const ballP = project3D(pose.ball, cx, cy, scale, camOverride);
-    const ballFloor = project3D([pose.ball[0], 0.01, pose.ball[2]], cx, cy, scale, camOverride);
-
-    ctx.fillStyle = "rgba(0,0,0,0.38)";
-    ctx.beginPath();
-    ctx.ellipse(ballFloor.x, ballFloor.y, 6.5 * ballFloor.s, 3.2 * ballFloor.s, 0, 0, Math.PI * 2);
-    ctx.fill();
-
     ctx.fillStyle = "#bef264";
     ctx.beginPath();
-    ctx.arc(ballP.x, ballP.y, 7.2 * ballP.s, 0, Math.PI * 2);
+    ctx.arc(ballP.x, ballP.y, Math.max(4, 6.2 * ballP.s), 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 1.2;
     ctx.stroke();
   }
 
-  ctx.fillStyle = theme.accent;
-  ctx.font = "bold 12px sans-serif";
-  ctx.fillText(theme.label, P.head.x - 48, P.head.y - headR - 10);
-
   ctx.restore();
   return P;
+}
+
+/**
+ * Draws a Sleek, Non-Obscuring Corner Telemetry HUD Panel (Zero Floating Text Over the Players!)
+ */
+function drawCleanCornerHUD(ctx, w, h, stroke, proPose, userPose, lock) {
+  ctx.save();
+  const boxW = 248;
+  const boxH = AppState.overlay.userVideoLoaded ? 98 : 82;
+  const bx = w - boxW - 12;
+  const by = 46;
+
+  ctx.fillStyle = "rgba(7, 11, 18, 0.82)";
+  ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(bx, by, boxW, boxH, 10) : ctx.rect(bx, by, boxW, boxH);
+  ctx.fill();
+  ctx.stroke();
+
+  const proShort = stroke.proName.split('(')[0].trim();
+  const vm = window.AIPoseEngine ? window.AIPoseEngine.videoMetrics : null;
+  const usrKnee = (AppState.overlay.userVideoLoaded && vm) ? vm.kneeAngleDeg : Math.round(userPose.kneeBendDeg);
+  const usrElbow = (AppState.overlay.userVideoLoaded && vm) ? vm.elbowAngleDeg : Math.round(userPose.elbowAngleDeg);
+
+  ctx.font = "bold 11px sans-serif";
+  ctx.fillStyle = "#fbbf24";
+  ctx.fillText(`⭐ ${proShort}`, bx + 10, by + 18);
+  ctx.fillStyle = "#38bdf8";
+  ctx.fillText(`vs 👤 Вы`, bx + 138, by + 18);
+
+  ctx.font = "11px monospace";
+  ctx.fillStyle = "#e2e8f0";
+  ctx.fillText(`Колено:  ${Math.round(proPose.kneeBendDeg)}°  vs  ${usrKnee}°`, bx + 10, by + 38);
+  ctx.fillText(`Локоть:  ${Math.round(proPose.elbowAngleDeg)}°  vs  ${usrElbow}°`, bx + 10, by + 56);
+  ctx.fillText(`Контакт: +${Math.round(proPose.contactOffsetCm)}см vs +${Math.round(userPose.contactOffsetCm)}см`, bx + 10, by + 74);
+
+  if (AppState.overlay.userVideoLoaded) {
+    ctx.fillStyle = "#34d399";
+    ctx.font = "bold 10px monospace";
+    const dirTxt = lock && lock.facingSign < 0 ? "Профиль ВЛЕВО" : "Профиль ВПРАВО";
+    ctx.fillText(`🎯 AI Авто-Зум 2.4x • ${dirTxt}`, bx + 10, by + 91);
+  }
+
+  ctx.restore();
 }
 
 /**
@@ -1212,32 +1081,32 @@ function render3DOverlayStage() {
 
   const proTheme = {
     label: `⭐ ${stroke.proName.split('(')[0].trim()}`,
-    main: "rgba(217, 119, 6, 0.85)",
-    highlight: "rgba(253, 224, 71, 0.92)",
+    main: AppState.overlay.userVideoLoaded ? "rgba(245, 158, 11, 0.36)" : "rgba(217, 119, 6, 0.52)",
+    highlight: "#fde047",
     accent: "#fbbf24",
-    wireframe: "rgba(254, 240, 138, 0.70)",
-    boxFill: "rgba(245, 158, 11, 0.30)",
-    shoeColor: "rgba(245, 158, 11, 0.90)",
-    footTrail: "rgba(251, 191, 36, 0.75)",
-    glowRing: "rgba(251, 191, 36, 0.25)",
-    ribbon: "rgba(250, 204, 21, 0.82)",
-    ribbonFill: "rgba(250, 204, 21, 0.16)",
-    racketStrings: "rgba(251, 191, 36, 0.24)"
+    wireframe: "rgba(254, 240, 138, 0.72)",
+    boxFill: "rgba(245, 158, 11, 0.16)",
+    shoeColor: "rgba(245, 158, 11, 0.85)",
+    footTrail: "rgba(251, 191, 36, 0.65)",
+    glowRing: "rgba(251, 191, 36, 0.18)",
+    ribbon: "rgba(250, 204, 21, 0.75)",
+    ribbonFill: "rgba(250, 204, 21, 0.12)",
+    racketStrings: "rgba(251, 191, 36, 0.20)"
   };
 
   const userTheme = {
     label: AppState.overlay.userVideoLoaded ? "👤 Вы (1:1 Видео)" : "👤 Ваша 3D-модель",
-    main: "rgba(2, 132, 199, 0.85)",
-    highlight: "rgba(125, 211, 252, 0.92)",
+    main: "rgba(14, 165, 233, 0.45)",
+    highlight: "#7dd3fc",
     accent: "#38bdf8",
-    wireframe: "rgba(186, 230, 253, 0.70)",
-    boxFill: "rgba(14, 165, 233, 0.30)",
-    shoeColor: "rgba(14, 165, 233, 0.90)",
-    footTrail: "rgba(56, 189, 248, 0.75)",
-    glowRing: "rgba(56, 189, 248, 0.25)",
-    ribbon: "rgba(56, 189, 248, 0.82)",
-    ribbonFill: "rgba(56, 189, 248, 0.16)",
-    racketStrings: "rgba(56, 189, 248, 0.24)"
+    wireframe: "rgba(186, 230, 253, 0.72)",
+    boxFill: "rgba(14, 165, 233, 0.16)",
+    shoeColor: "rgba(14, 165, 233, 0.85)",
+    footTrail: "rgba(56, 189, 248, 0.65)",
+    glowRing: "rgba(56, 189, 248, 0.18)",
+    ribbon: "rgba(56, 189, 248, 0.75)",
+    ribbonFill: "rgba(56, 189, 248, 0.12)",
+    racketStrings: "rgba(56, 189, 248, 0.20)"
   };
 
   const baseScale = 235 * Viewer3D.cam.zoom;
@@ -1245,59 +1114,57 @@ function render3DOverlayStage() {
   const centerX = w * 0.50 + Viewer3D.cam.panX;
 
   if (AppState.overlay.mode === 'split') {
-    ctx.save();
-    ctx.beginPath(); ctx.rect(0, 0, w / 2, h); ctx.clip();
-    if (AppState.overlay.proVideoLoaded) {
-      drawCleanVideoCover(ctx, proVid, 0, 0, w / 2, h);
-    }
-    if (!AppState.overlay.proVideoLoaded || Viewer3D.layers.show3DOverVideo) {
+    if (AppState.overlay.userVideoLoaded) {
+      // SYNCHRO-STUDIO SPLIT MODE WHEN USER VIDEO IS LOADED:
+      // Left Half: Your AI Auto-Zoomed Video + Sleek X-Ray Cyan Skeleton on your body
+      // Right Half: Clean Dark 3D Hawkeye Stage with BOTH 3D Ghosts (Gold Federer + Blue You) overlaid at full size & locked angle!
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, w / 2, h); ctx.clip();
+      const vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, w / 2, h, lock);
+      if (Viewer3D.layers.show3DOverVideo && vidRect && window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+        drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.95);
+      }
+      ctx.restore();
+
+      // Right Half: Full-scale 3D Hologram Comparison on dark 3D Hawkeye court!
+      ctx.save();
+      ctx.beginPath(); ctx.rect(w / 2, 0, w / 2, h); ctx.clip();
+      draw3DFloorGrid(ctx, w * 0.75, centerY, baseScale * 0.90, proCam);
+      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, w * 0.75, centerY, baseScale * 0.90, userTheme, 0.88, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, w * 0.75, centerY, baseScale * 0.90, proTheme, 0.92, proCam);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, w / 2, h); ctx.clip();
+      if (AppState.overlay.proVideoLoaded) drawCleanVideoCover(ctx, proVid, 0, 0, w / 2, h, lock);
       draw3DFloorGrid(ctx, w * 0.25, centerY, baseScale * 0.86, proCam);
       draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, w * 0.25, centerY, baseScale * 0.86, proTheme, 0.95, proCam);
-    }
-    ctx.restore();
+      ctx.restore();
 
-    ctx.save();
-    ctx.beginPath(); ctx.rect(w / 2, 0, w / 2, h); ctx.clip();
-    if (AppState.overlay.userVideoLoaded) {
-      const vidRect = drawCleanVideoCover(ctx, userVid, w / 2, 0, w / 2, h);
-      if (Viewer3D.layers.show3DOverVideo && vidRect) {
-        if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
-          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.92);
-        } else {
-          const tf = computeLockedProTransform(userPose, vidRect, lock, proCam);
-          draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, 0.88, proCam);
-        }
-      }
-    } else {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(w / 2, 0, w / 2, h); ctx.clip();
       draw3DFloorGrid(ctx, w * 0.75, centerY, baseScale * 0.86);
       draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, w * 0.75, centerY, baseScale * 0.86, userTheme, 0.95);
+      ctx.restore();
     }
-    ctx.restore();
 
-    ctx.strokeStyle = "rgba(56, 189, 248, 0.45)";
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.55)";
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke();
 
   } else if (AppState.overlay.mode === 'curtain') {
     const splitX = AppState.overlay.curtainX * w;
-    let sharedVidRect = null;
-    if (AppState.overlay.userVideoLoaded) {
-      // Pre-compute video rect so both sides of the curtain lock to the exact same player coordinates
-      const vw = userVid.videoWidth || 720;
-      const vh = userVid.videoHeight || 1280;
-      const s = Math.min(w / vw, h / vh);
-      sharedVidRect = { dx: (w - vw * s) / 2, dy: (h - vh * s) / 2, dw: vw * s, dh: vh * s };
-    }
 
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, splitX, h); ctx.clip();
-    if (AppState.overlay.proVideoLoaded) drawCleanVideoCover(ctx, proVid, 0, 0, w, h);
-    else if (AppState.overlay.userVideoLoaded) drawCleanVideoCover(ctx, userVid, 0, 0, w, h);
+    let vidRectL = null;
+    if (AppState.overlay.proVideoLoaded) vidRectL = drawCleanVideoCover(ctx, proVid, 0, 0, w, h, lock);
+    else if (AppState.overlay.userVideoLoaded) vidRectL = drawCleanVideoCover(ctx, userVid, 0, 0, w, h, lock);
 
-    if (sharedVidRect) {
-      const tf = computeLockedProTransform(proPose, sharedVidRect, lock, proCam);
+    if (vidRectL) {
+      const tf = computeLockedProTransform(proPose, vidRectL, lock, proCam);
       draw3DFloorGrid(ctx, tf.cx, tf.cy, tf.scale, proCam);
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, 0.95, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, 0.92, proCam);
     } else {
       draw3DFloorGrid(ctx, centerX, centerY, baseScale, proCam);
       draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, centerX, centerY, baseScale, proTheme, 0.95, proCam);
@@ -1307,12 +1174,12 @@ function render3DOverlayStage() {
     ctx.save();
     ctx.beginPath(); ctx.rect(splitX, 0, w - splitX, h); ctx.clip();
     if (AppState.overlay.userVideoLoaded) {
-      const vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, w, h);
-      if (Viewer3D.layers.show3DOverVideo && vidRect) {
+      const vidRectR = drawCleanVideoCover(ctx, userVid, 0, 0, w, h, lock);
+      if (Viewer3D.layers.show3DOverVideo && vidRectR) {
         if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
-          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.92);
+          drawDirectVideo3DAthlete(ctx, vidRectR, userTheme, 0.95);
         } else {
-          const tf = computeLockedProTransform(userPose, vidRect, lock, proCam);
+          const tf = computeLockedProTransform(userPose, vidRectR, lock, proCam);
           draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, 0.88, proCam);
         }
       }
@@ -1330,69 +1197,65 @@ function render3DOverlayStage() {
     if (AppState.overlay.userVideoLoaded) {
       ctx.save();
       ctx.globalAlpha = AppState.overlay.proVideoLoaded ? Math.max(0.45, userAlpha) : 1.0;
-      vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, w, h);
+      vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, w, h, lock);
       ctx.restore();
     }
     if (AppState.overlay.proVideoLoaded) {
       ctx.save();
       ctx.globalAlpha = AppState.overlay.userVideoLoaded ? proAlpha : 1.0;
-      drawCleanVideoCover(ctx, proVid, 0, 0, w, h);
+      drawCleanVideoCover(ctx, proVid, 0, 0, w, h, lock);
       ctx.restore();
     }
 
     if (AppState.overlay.userVideoLoaded && vidRect) {
       if (Viewer3D.layers.show3DOverVideo) {
-        // Compute exact 1:1 scale & anchor on the video player's court floor & body height!
+        // Compute exact 1:1 scale & anchor on the AI-zoomed video player!
         const tf = computeLockedProTransform(proPose, vidRect, lock, proCam);
 
-        // 1. Draw 3D Court Floor Grid scaled & anchored right under the player's feet in the video
-        draw3DFloorGrid(ctx, tf.cx, tf.cy, tf.scale, proCam);
-
-        // 2. Draw Blue User 3D Volumetric Athlete directly 1:1 on the player in the video (NO duplicate floating blue model!)
+        // 1. Sleek X-Ray Cyan Skeleton directly on the video player's limbs (real body stays 100% visible!)
         if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
-          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, Math.max(0.45, userAlpha));
+          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, Math.max(0.55, userAlpha));
         } else {
           const uTf = computeLockedProTransform(userPose, vidRect, lock, proCam);
           draw3DVolumetricAthlete(
             ctx, userPose, stroke.userKeyframes,
             uTf.cx, uTf.cy, uTf.scale,
             userTheme,
-            Math.max(0.42, userAlpha),
+            Math.max(0.45, userAlpha),
             proCam
           );
         }
 
-        // 3. Draw Gold Pro Reference 3D Ghost locked 1:1 to the player's height, floor line, facing direction & swing phase!
-        const pPro = draw3DVolumetricAthlete(
+        // 2. Translucent X-Ray Gold Pro 3D Ghost locked 1:1 in height, floor line, facing direction & swing phase!
+        draw3DVolumetricAthlete(
           ctx, proPose, stroke.proKeyframes,
           tf.cx, tf.cy, tf.scale,
           proTheme,
-          Math.max(0.42, proAlpha),
+          Math.max(0.48, proAlpha),
           proCam
         );
-
-        draw3DDeltaCallouts(ctx, proPose, userPose, pPro, null, tf.cx, tf.cy, tf.scale, proCam);
       }
     } else if (!AppState.overlay.userVideoLoaded && (!AppState.overlay.proVideoLoaded || Viewer3D.layers.show3DOverVideo)) {
       draw3DFloorGrid(ctx, centerX, centerY, baseScale);
 
-      const pUser = draw3DVolumetricAthlete(
+      draw3DVolumetricAthlete(
         ctx, userPose, stroke.userKeyframes,
         centerX, centerY, baseScale,
         userTheme,
-        Math.max(0.32, userAlpha)
+        Math.max(0.38, userAlpha)
       );
 
-      const pPro = draw3DVolumetricAthlete(
+      draw3DVolumetricAthlete(
         ctx, proPose, stroke.proKeyframes,
         centerX, centerY, baseScale,
         proTheme,
-        Math.max(0.35, proAlpha)
+        Math.max(0.42, proAlpha)
       );
-
-      draw3DDeltaCallouts(ctx, proPose, userPose, pPro, pUser, centerX, centerY, baseScale);
     }
   }
+
+  // Draw Clean Corner Telemetry HUD (never blocks the players!)
+  drawCleanCornerHUD(ctx, w, h, stroke, proPose, userPose, lock);
 
   let activePhase = stroke.phases[0];
   stroke.phases.forEach(p => {
@@ -1405,35 +1268,4 @@ function render3DOverlayStage() {
   if (weightEl) {
     weightEl.textContent = `Профи ${Math.round(proPose.weightL)}% лев / Вы ${Math.round(userPose.weightL)}% лев`;
   }
-}
-
-function draw3DDeltaCallouts(ctx, proPose, userPose, pPro, pUser, cx, cy, scale, camOverride) {
-  ctx.save();
-
-  const phaseT = proPose._phaseT !== undefined ? proPose._phaseT : AppState.overlay.progress;
-  if (phaseT >= 0.48 && phaseT <= 0.74) {
-    const bPro = project3D(proPose.ball, cx, cy, scale, camOverride);
-    const bUsr = project3D(userPose.ball, cx, cy, scale, camOverride);
-
-    ctx.strokeStyle = "#ef4444";
-    ctx.lineWidth = 2.0;
-    ctx.setLineDash([4, 3]);
-    ctx.beginPath();
-    ctx.moveTo(bPro.x, bPro.y);
-    ctx.lineTo(bUsr.x, bUsr.y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    const midX = (bPro.x + bUsr.x) / 2;
-    const midY = Math.min(bPro.y, bUsr.y) - 18;
-    ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
-    ctx.fillRect(midX - 85, midY - 15, 175, 22);
-    ctx.strokeStyle = "#ef4444";
-    ctx.strokeRect(midX - 85, midY - 15, 175, 22);
-    ctx.fillStyle = "#fca5a5";
-    ctx.font = "bold 11px monospace";
-    ctx.fillText(`Δ Контакт: ${Math.round(proPose.contactOffsetCm - userPose.contactOffsetCm)} см вперёд`, midX - 78, midY);
-  }
-
-  ctx.restore();
 }
