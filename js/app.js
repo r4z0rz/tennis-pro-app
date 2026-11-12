@@ -251,11 +251,13 @@ function setOverlayMode(mode) {
 function onAlphaChange(val) {
   AppState.overlay.alpha = parseFloat(val) / 100;
   document.getElementById('alpha-label').textContent = `${val}%`;
+  if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
 }
 
 function onVideoScrub(val) {
   AppState.overlay.progress = parseFloat(val) / 1000;
   syncHtmlVideosToProgress();
+  if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
 }
 
 function toggleVideoPlay() {
@@ -272,6 +274,7 @@ function toggleVideoPlay() {
     if (uv) uv.pause();
     if (pv) pv.pause();
   }
+  if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
 }
 
 function stepFrame(dir) {
@@ -286,6 +289,7 @@ function stepFrame(dir) {
   AppState.overlay.progress = Math.max(0, Math.min(1, AppState.overlay.progress + dir * 0.015));
   document.getElementById('video-scrubber').value = Math.round(AppState.overlay.progress * 1000);
   syncHtmlVideosToProgress();
+  if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
 }
 
 function setPlaySpeed(sp, btnEl) {
@@ -808,34 +812,37 @@ function drawTelemetryRadar(speed, transitMs, surfaceDrop) {
 let lastTimestamp = performance.now();
 
 function appRenderLoop(now) {
-  const dt = (now - lastTimestamp) / 1000;
+  const dt = Math.min(0.1, Math.max(0.001, (now - lastTimestamp) / 1000));
   lastTimestamp = now;
 
-  if (AppState.currentTab === 'overlay') {
-    if (AppState.overlay.isPlaying) {
-      const uv = document.getElementById('user-video-element');
-      const strokeDuration = 2.4;
-      if (AppState.overlay.userVideoLoaded && uv && uv.duration && !uv.paused) {
-        // Map video time smoothly to 2.4s biomechanical swing cycle so long videos never freeze the 3D ghost
-        const cycleLen = Math.min(uv.duration, strokeDuration);
-        const rawT = Math.max(0, uv.currentTime - (Viewer3D.videoSyncOffsetSec || 0));
-        AppState.overlay.progress = (rawT % cycleLen) / cycleLen;
-      } else {
-        AppState.overlay.progress += (dt * AppState.overlay.speed) / strokeDuration;
-        if (AppState.overlay.progress >= 1.0) AppState.overlay.progress = 0.0;
+  try {
+    if (AppState.currentTab === 'overlay') {
+      if (AppState.overlay.isPlaying) {
+        const uv = document.getElementById('user-video-element');
+        const strokeDuration = 2.4;
+        if (AppState.overlay.userVideoLoaded && uv && uv.duration && !uv.paused) {
+          const cycleLen = Math.min(uv.duration, strokeDuration);
+          const rawT = Math.max(0, uv.currentTime - (Viewer3D.videoSyncOffsetSec || 0));
+          AppState.overlay.progress = (rawT % cycleLen) / cycleLen;
+        } else {
+          AppState.overlay.progress += (dt * AppState.overlay.speed) / strokeDuration;
+          if (AppState.overlay.progress >= 1.0) AppState.overlay.progress = 0.0;
+        }
+        const scrub = document.getElementById('video-scrubber');
+        if (scrub) scrub.value = Math.round(AppState.overlay.progress * 1000);
       }
-      const scrub = document.getElementById('video-scrubber');
-      if (scrub) scrub.value = Math.round(AppState.overlay.progress * 1000);
+      render3DOverlayStage();
+    } else if (AppState.currentTab === 'footwork' && AppState.footwork.isPlaying) {
+      const r = RALLY_DATA[AppState.footwork.rallyId] || RALLY_DATA.rally_long;
+      AppState.footwork.progress += (dt * AppState.footwork.speed) / r.durationSec;
+      if (AppState.footwork.progress >= 1.0) AppState.footwork.progress = 0.0;
+      document.getElementById('rally-scrubber').value = Math.round(AppState.footwork.progress * 1000);
+      drawFootworkFrame();
+    } else if (AppState.currentTab === 'telemetry') {
+      updateFlightPhysics();
     }
-    render3DOverlayStage();
-  } else if (AppState.currentTab === 'footwork' && AppState.footwork.isPlaying) {
-    const r = RALLY_DATA[AppState.footwork.rallyId] || RALLY_DATA.rally_long;
-    AppState.footwork.progress += (dt * AppState.footwork.speed) / r.durationSec;
-    if (AppState.footwork.progress >= 1.0) AppState.footwork.progress = 0.0;
-    document.getElementById('rally-scrubber').value = Math.round(AppState.footwork.progress * 1000);
-    drawFootworkFrame();
-  } else if (AppState.currentTab === 'telemetry') {
-    updateFlightPhysics();
+  } catch (err) {
+    console.error("Render frame error:", err);
   }
 
   requestAnimationFrame(appRenderLoop);
