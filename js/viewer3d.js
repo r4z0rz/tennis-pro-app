@@ -200,11 +200,20 @@ function loadVideoFileIntoSlot(file, slot) {
       AppState.overlay.proVideoLoaded = true;
       const bPro = document.getElementById('badge-pro');
       if (bPro) bPro.innerHTML = `⭐ ВИДЕО ПРОФИ: ${file.name.slice(0, 18)}`;
+      if (window.AIPoseEngine) {
+        window.AIPoseEngine.liveProPose3D = null;
+        window.AIPoseEngine.liveProLandmarks2D = null;
+        window.AIPoseEngine.proRacketTipTrail2D = [];
+        window.AIPoseEngine.liveProRacket2D = null;
+        window.AIPoseEngine.proVideoLock.active = false;
+        window.AIPoseEngine.proVideoMetrics.framesAnalyzed = 0;
+        window.AIPoseEngine.proVideoMetrics.fileName = file.name;
+      }
     } else {
       AppState.overlay.userVideoLoaded = true;
       const bUsr = document.getElementById('badge-user');
       if (bUsr) bUsr.innerHTML = `📹 ВАШЕ ВИДЕО (AI 3D РИГ): ${file.name.slice(0, 18)}`;
-      Viewer3D.cam.zoom = 1.02;
+      Viewer3D.cam.zoom = 1.0;
       Viewer3D.cam.panX = 0;
       Viewer3D.cam.panY = 32;
       if (typeof setOverlayMode === 'function') {
@@ -287,23 +296,37 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
 
   const activeLock = lock || (window.AIPoseEngine && window.AIPoseEngine.videoLock);
   let smartZoom = 1.0;
-  let focusNormX = 0.52;
-  let focusNormY = 0.46;
+  let focusNormX = 0.50;
+  let focusNormY = 0.45;
 
-  if (activeLock) {
-    const spanNorm = Math.max(0.16, activeLock.torsoLegNormSpan || 0.25);
-    const unzoomedSpanPx = spanNorm * vh * baseScale;
-    const targetSpanPx = h * 0.44;
-    smartZoom = Math.max(1.0, Math.min(2.65, targetSpanPx / Math.max(40, unzoomedSpanPx))) * Viewer3D.cam.zoom;
-    focusNormX = activeLock.hipNormX || 0.54;
-    focusNormY = ((activeLock.shNormY || 0.33) + (activeLock.ankleNormY || 0.58)) * 0.5;
+  if (activeLock && activeLock.active) {
+    // Use full head-to-shoe span so the head and raised racket are NEVER cropped!
+    const fullSpanNorm = Math.max(0.24, activeLock.fullBodyNormSpan || (activeLock.torsoLegNormSpan ? activeLock.torsoLegNormSpan * 1.38 : 0.36));
+    const unzoomedFullPx = fullSpanNorm * vh * baseScale;
+    const targetFullPx = h * 0.56; // Full player height = 56% of viewport height (leaves 44% headroom & foot margin!)
+    smartZoom = Math.max(1.0, Math.min(1.85, targetFullPx / Math.max(45, unzoomedFullPx))) * Viewer3D.cam.zoom;
+    focusNormX = activeLock.hipNormX || 0.50;
+    const headY = activeLock.headNormY !== undefined ? activeLock.headNormY : Math.max(0.08, (activeLock.shNormY || 0.33) - 0.10);
+    const ankleY = activeLock.ankleNormY || 0.62;
+    focusNormY = (headY + ankleY) * 0.5;
   }
 
   const dw = vw * baseScale * smartZoom;
   const dh = vh * baseScale * smartZoom;
 
+  // Position player with generous headroom above headY so the head is 100% visible!
   let dx = (x + w * 0.50) - focusNormX * dw + Viewer3D.cam.panX;
-  let dy = (y + h * 0.52) - focusNormY * dh + (Viewer3D.cam.panY - 32);
+  let dy = (y + h * 0.53) - focusNormY * dh + (Viewer3D.cam.panY - 32);
+
+  // Headroom safety clamp: ensure headNormY is at least 38px below the top edge y of this viewport!
+  if (activeLock && activeLock.active) {
+    const headY = activeLock.headNormY !== undefined ? activeLock.headNormY : Math.max(0.08, (activeLock.shNormY || 0.33) - 0.10);
+    const headScreenY = dy + headY * dh;
+    const minTopY = y + Math.min(44, h * 0.16);
+    if (headScreenY < minTopY) {
+      dy += (minTopY - headScreenY);
+    }
+  }
 
   ctx.save();
   ctx.beginPath();
@@ -1511,6 +1534,9 @@ function render3DOverlayStage() {
         matchedPhaseT: 0.62
       };
 
+  const proLock = (window.AIPoseEngine && window.AIPoseEngine.proVideoLock && window.AIPoseEngine.proVideoLock.active)
+    ? window.AIPoseEngine.proVideoLock
+    : lock;
   const autoAlign = Boolean(window.AIPoseEngine ? window.AIPoseEngine.autoAlignEnabled : true);
   const effectivePhaseT = (AppState.overlay.userVideoLoaded && autoAlign && lock.active)
     ? lock.matchedPhaseT
@@ -1578,7 +1604,7 @@ function render3DOverlayStage() {
       const halfH = Math.round(h * 0.5);
       ctx.save();
       ctx.beginPath(); ctx.rect(0, 0, splitX, halfH); ctx.clip();
-      const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, splitX, halfH, lock);
+      const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, splitX, halfH, proLock);
       if (Viewer3D.layers.show3DOverVideo && proRect && window.AIPoseEngine && window.AIPoseEngine.liveProLandmarks2D) {
         drawDirectVideo3DAthlete(ctx, proRect, proTheme, 0.96, 'pro');
       }
@@ -1621,7 +1647,7 @@ function render3DOverlayStage() {
       ctx.font = "bold 10px sans-serif";
       ctx.fillText(`⭐ 3D-База: ${stroke.proName.split('(')[0].trim()}`, pipX + 8, pipY + 14);
     } else if (AppState.overlay.proVideoLoaded) {
-      const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, splitX, h, lock);
+      const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, splitX, h, proLock);
       if (Viewer3D.layers.show3DOverVideo && proRect && window.AIPoseEngine && window.AIPoseEngine.liveProLandmarks2D) {
         drawDirectVideo3DAthlete(ctx, proRect, proTheme, 0.96, 'pro');
       }
@@ -1676,7 +1702,7 @@ function render3DOverlayStage() {
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, splitX, h); ctx.clip();
     let vidRectL = null;
-    if (AppState.overlay.proVideoLoaded) vidRectL = drawCleanVideoCover(ctx, proVid, 0, 0, w, h, lock);
+    if (AppState.overlay.proVideoLoaded) vidRectL = drawCleanVideoCover(ctx, proVid, 0, 0, w, h, proLock);
     else if (AppState.overlay.userVideoLoaded) vidRectL = drawCleanVideoCover(ctx, userVid, 0, 0, w, h, lock);
 
     if (vidRectL) {
@@ -1722,7 +1748,7 @@ function render3DOverlayStage() {
     if (AppState.overlay.proVideoLoaded) {
       ctx.save();
       ctx.globalAlpha = AppState.overlay.userVideoLoaded ? proAlpha : 1.0;
-      drawCleanVideoCover(ctx, proVid, 0, 0, w, h, lock);
+      drawCleanVideoCover(ctx, proVid, 0, 0, w, h, proLock);
       ctx.restore();
     }
 

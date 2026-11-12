@@ -17,6 +17,7 @@ window.AIPoseEngine = {
   status: 'ready',
   mediapipeLoaded: false,
   poseLandmarker: null,
+  poseLandmarkerPro: null,
   autoAlignEnabled: true,
   showMotionStrobe: true,
   showAngleGrid: true,
@@ -71,18 +72,36 @@ window.AIPoseEngine = {
     landingDepthM: 10.7
   },
 
-  // Exact video-locked alignment transform for the Pro 3D Ghost
+  // Exact video-locked alignment transform for User video and Pro reference video (independent so they never fight!)
   videoLock: {
     active: false,
     hipNormX: 0.52,
     hipNormY: 0.48,
     ankleNormY: 0.62,
     shNormY: 0.34,
+    headNormY: 0.24,
     torsoLegNormSpan: 0.28,
+    fullBodyNormSpan: 0.38,
     facingSign: -1,      // -1 = facing left on screen, +1 = facing right on screen
     matchedYawDeg: -86,  // 3D yaw so Pro Ghost faces the exact same direction as video player
     matchedPitchDeg: 10,
     matchedPhaseT: 0.62, // Swing phase [0..1] matched to the video player's arm/wrist state
+    activeHand: 'left_screen'
+  },
+
+  proVideoLock: {
+    active: false,
+    hipNormX: 0.52,
+    hipNormY: 0.48,
+    ankleNormY: 0.62,
+    shNormY: 0.34,
+    headNormY: 0.24,
+    torsoLegNormSpan: 0.28,
+    fullBodyNormSpan: 0.38,
+    facingSign: -1,
+    matchedYawDeg: -86,
+    matchedPitchDeg: 10,
+    matchedPhaseT: 0.62,
     activeHand: 'left_screen'
   },
 
@@ -136,24 +155,25 @@ async function initAIPoseEngine() {
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
     );
 
+    const modelUrlFull = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
+    const makeOpts = (delegate) => ({
+      baseOptions: {
+        modelAssetPath: modelUrlFull,
+        delegate
+      },
+      runningMode: 'VIDEO',
+      numPoses: 1,
+      minPoseDetectionConfidence: 0.55,
+      minPosePresenceConfidence: 0.55,
+      minTrackingConfidence: 0.60
+    });
+
     try {
-      window.AIPoseEngine.poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-          delegate: 'GPU'
-        },
-        runningMode: 'VIDEO',
-        numPoses: 1
-      });
+      window.AIPoseEngine.poseLandmarker = await PoseLandmarker.createFromOptions(vision, makeOpts('GPU'));
+      window.AIPoseEngine.poseLandmarkerPro = await PoseLandmarker.createFromOptions(vision, makeOpts('GPU'));
     } catch (gpuErr) {
-      window.AIPoseEngine.poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-          delegate: 'CPU'
-        },
-        runningMode: 'VIDEO',
-        numPoses: 1
-      });
+      window.AIPoseEngine.poseLandmarker = await PoseLandmarker.createFromOptions(vision, makeOpts('CPU'));
+      window.AIPoseEngine.poseLandmarkerPro = await PoseLandmarker.createFromOptions(vision, makeOpts('CPU'));
     }
 
     window.AIPoseEngine.mediapipeLoaded = true;
@@ -181,16 +201,23 @@ function smoothScalar(prev, next, alpha) {
   return prev + (next - prev) * alpha;
 }
 
-function smoothLandmarks2D(prevLm, nextLm, alpha = 0.35) {
+function smoothLandmarks2D(prevLm, nextLm, alpha = 0.24) {
   if (!prevLm || prevLm.length !== nextLm.length) {
     return nextLm.map(p => ({ x: p.x, y: p.y, z: p.z || 0, visibility: p.visibility ?? 1 }));
   }
-  return nextLm.map((p, i) => ({
-    x: prevLm[i].x + (p.x - prevLm[i].x) * alpha,
-    y: prevLm[i].y + (p.y - prevLm[i].y) * alpha,
-    z: (prevLm[i].z || 0) + ((p.z || 0) - (prevLm[i].z || 0)) * alpha,
-    visibility: p.visibility ?? 1
-  }));
+  return nextLm.map((p, i) => {
+    const dx = p.x - prevLm[i].x;
+    const dy = p.y - prevLm[i].y;
+    const jump = Math.hypot(dx, dy);
+    // Reject single-frame MediaPipe outlier spikes (>0.16 of frame in 1 step) and adaptive deadzone for micro-jitter
+    const adaptiveAlpha = jump > 0.16 ? 0.06 : (jump < 0.004 ? 0.08 : alpha);
+    return {
+      x: prevLm[i].x + dx * adaptiveAlpha,
+      y: prevLm[i].y + dy * adaptiveAlpha,
+      z: (prevLm[i].z || 0) + ((p.z || 0) - (prevLm[i].z || 0)) * adaptiveAlpha,
+      visibility: p.visibility ?? 1
+    };
+  });
 }
 
 function calc3DAngleDeg(a, b, c) {
@@ -219,43 +246,45 @@ function processVideoFrameWithAI(videoEl, slot, timestampMs) {
   if (!videoEl || videoEl.readyState < 2 || !videoEl.videoWidth) return null;
 
   const engine = window.AIPoseEngine;
-  // Run even when paused if we haven't locked onto this frame yet!
   const curVideoTime = videoEl.currentTime;
-  const timeChanged = slot === 'user'
-    ? Math.abs(curVideoTime - engine.lastVideoTimeUser) > 0.008
-    : Math.abs(curVideoTime - engine.lastVideoTimePro) > 0.008;
+  const lastTimeKey = slot === 'pro' ? 'lastVideoTimePro' : 'lastVideoTimeUser';
+  const lastInfKey = slot === 'pro' ? '_lastInfMsPro' : '_lastInfMsUser';
+  const activeLock = slot === 'pro' ? engine.proVideoLock : engine.videoLock;
 
-  if (!timeChanged && engine.videoLock.active && (timestampMs - engine.lastInferenceTimeMs < 120)) {
+  const timeChanged = Math.abs(curVideoTime - (engine[lastTimeKey] || -1)) > 0.008;
+  if (!timeChanged && activeLock.active && (timestampMs - (engine[lastInfKey] || 0) < 120)) {
     return slot === 'user' ? engine.liveUserPose3D : engine.liveProPose3D;
   }
-  if ( timestampMs - engine.lastInferenceTimeMs < 35 && slot === engine._lastSlot ) {
+  if (timestampMs - (engine[lastInfKey] || 0) < 32) {
     return slot === 'user' ? engine.liveUserPose3D : engine.liveProPose3D;
   }
 
-  engine.lastInferenceTimeMs = timestampMs;
-  engine._lastSlot = slot;
-  if (slot === 'user') engine.lastVideoTimeUser = curVideoTime;
-  else engine.lastVideoTimePro = curVideoTime;
+  engine[lastInfKey] = timestampMs;
+  engine[lastTimeKey] = curVideoTime;
 
   let detectedWithMediaPipe = false;
+  const landmarker = slot === 'pro'
+    ? (engine.poseLandmarkerPro || engine.poseLandmarker)
+    : engine.poseLandmarker;
 
-  if (engine.mediapipeLoaded && engine.poseLandmarker) {
+  if (engine.mediapipeLoaded && landmarker) {
     try {
-      const monoTs = Math.max(Math.round(timestampMs), (engine._lastMonoTs || 0) + 1);
-      engine._lastMonoTs = monoTs;
-      const result = engine.poseLandmarker.detectForVideo(videoEl, monoTs);
+      const monoKey = slot === 'pro' ? '_lastMonoTsPro' : '_lastMonoTsUser';
+      const monoTs = Math.max(Math.round(timestampMs), (engine[monoKey] || 0) + 1);
+      engine[monoKey] = monoTs;
+      const result = landmarker.detectForVideo(videoEl, monoTs);
       if (result && result.landmarks && result.landmarks.length > 0) {
         const rawLm2d = result.landmarks[0];
         const lm3d = (result.worldLandmarks && result.worldLandmarks[0]) ? result.worldLandmarks[0] : rawLm2d;
 
         if (slot === 'user') {
-          engine.liveUserLandmarks2D = smoothLandmarks2D(engine.liveUserLandmarks2D, rawLm2d, 0.42);
+          engine.liveUserLandmarks2D = smoothLandmarks2D(engine.liveUserLandmarks2D, rawLm2d, 0.24);
           const lockData = computeVideoLockAndMetrics(engine.liveUserLandmarks2D, lm3d, 'user');
           engine.liveUserPose3D = lockData.pose3D;
           accumulateVideoMetrics(lockData.pose3D, lockData.metrics, timestampMs);
           detectedWithMediaPipe = true;
         } else if (slot === 'pro') {
-          engine.liveProLandmarks2D = smoothLandmarks2D(engine.liveProLandmarks2D, rawLm2d, 0.42);
+          engine.liveProLandmarks2D = smoothLandmarks2D(engine.liveProLandmarks2D, rawLm2d, 0.24);
           const proData = computeVideoLockAndMetrics(engine.liveProLandmarks2D, lm3d, 'pro');
           engine.liveProPose3D = proData.pose3D;
           accumulateProVideoMetrics(proData.pose3D, proData.metrics, timestampMs);
@@ -292,17 +321,19 @@ function processVideoFrameWithAI(videoEl, slot, timestampMs) {
  */
 function computeVideoLockAndMetrics(lm2d, lm3d, slot = 'user') {
   const engine = window.AIPoseEngine;
-  const lock = engine.videoLock;
+  const lock = slot === 'pro' ? engine.proVideoLock : engine.videoLock;
 
   const hipMidX = (lm2d[23].x + lm2d[24].x) / 2;
   const hipMidY = (lm2d[23].y + lm2d[24].y) / 2;
   const shMidX = (lm2d[11].x + lm2d[12].x) / 2;
   const shMidY = (lm2d[11].y + lm2d[12].y) / 2;
+  const headY = Math.min(lm2d[0].y, shMidY - 0.06);
   const ankleMidX = (lm2d[27].x + lm2d[28].x) / 2;
-  const ankleMidY = Math.max(lm2d[27].y, lm2d[28].y);
+  const ankleMidY = Math.max(lm2d[27].y, lm2d[28].y, lm2d[31].y, lm2d[32].y);
 
-  // Measure vertical span from shoulders to ankles in normalized video coordinates
+  // Measure vertical span from shoulders to ankles and full body (head to shoes) in normalized video coordinates
   const rawSpan = Math.max(0.14, Math.abs(ankleMidY - shMidY));
+  const fullBodySpan = Math.max(0.22, Math.abs(ankleMidY - headY));
 
   // Determine which direction on screen (-1 = LEFT, +1 = RIGHT) the player is facing & hitting:
   // Check toe vs heel X, nose vs ear midpoint X, and extended wrist vs shoulder X
@@ -349,17 +380,19 @@ function computeVideoLockAndMetrics(lm2d, lm3d, slot = 'user') {
     targetPhaseT = 0.80;
   }
 
-  // Smoothly lock video alignment state
-  const a = lock.active ? 0.25 : 1.0;
+  // Ultra-stable camera & bounding-box lock (alpha = 0.06 so the video frame NEVER jitters or shakes!)
+  const a = lock.active ? 0.06 : 1.0;
   lock.hipNormX = smoothScalar(lock.hipNormX, hipMidX, a);
   lock.hipNormY = smoothScalar(lock.hipNormY, hipMidY, a);
   lock.ankleNormY = smoothScalar(lock.ankleNormY, ankleMidY, a);
   lock.shNormY = smoothScalar(lock.shNormY, shMidY, a);
+  lock.headNormY = smoothScalar(lock.headNormY, headY, a);
   lock.torsoLegNormSpan = smoothScalar(lock.torsoLegNormSpan, rawSpan, a * 0.5);
+  lock.fullBodyNormSpan = smoothScalar(lock.fullBodyNormSpan, fullBodySpan, a * 0.5);
   lock.facingSign = facingSign;
   lock.matchedYawDeg = smoothScalar(lock.matchedYawDeg, targetYaw, a);
   lock.matchedPitchDeg = 10;
-  lock.matchedPhaseT = smoothScalar(lock.matchedPhaseT, targetPhaseT, 0.35);
+  lock.matchedPhaseT = smoothScalar(lock.matchedPhaseT, targetPhaseT, 0.18);
   lock.active = true;
 
   engine.userDetectedCam.yaw = lock.matchedYawDeg;
