@@ -850,7 +850,7 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   // 7. FLUID 3D ARMS
   drawFluid3DLimb(ctx, pose.shL, pose.elL, 10.2, cx, cy, scale, theme, camOverride);
   drawFluid3DLimb(ctx, pose.elL, pose.wrL, 8.4, cx, cy, scale, theme, camOverride);
-  drawFluid3DLimb(ctx, pose.shR, pose.elR, 10.6, cx, cy, scale, camOverride);
+  drawFluid3DLimb(ctx, pose.shR, pose.elR, 10.6, cx, cy, scale, theme, camOverride);
   drawFluid3DLimb(ctx, pose.elR, pose.wrR, 8.8, cx, cy, scale, theme, camOverride);
 
   // 8. SMOOTH 3D JOINT SPHERES
