@@ -96,8 +96,8 @@
         <div class="flex flex-wrap items-center gap-2">
           <span class="font-semibold text-slate-400">Режим:</span>
           <div class="inline-flex rounded-lg bg-slate-800 p-0.5 border border-slate-700">
-            <button onclick="setOverlayMode('ghost')" id="mode-ghost-btn" class="px-2.5 py-1 rounded-md font-semibold bg-sky-500 text-slate-950 shadow">3D Ghost-наложение</button>
-            <button onclick="setOverlayMode('split')" id="mode-split-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Сплит 50/50</button>
+            <button onclick="setOverlayMode('ghost')" id="mode-ghost-btn" class="px-2.5 py-1 rounded-md font-semibold bg-sky-500 text-slate-950 shadow">3D Ghost + Оба видео</button>
+            <button onclick="setOverlayMode('split')" id="mode-split-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Сплит 50/50 (Обе 3D-сетки)</button>
             <button onclick="setOverlayMode('curtain')" id="mode-curtain-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Шторка (Curtain)</button>
           </div>
         </div>
@@ -137,6 +137,33 @@
           </label>
           <button id="btn-clear-video" onclick="clearUploadedVideos()" class="hidden px-2 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-semibold transition">
             ✕ Сбросить видео
+          </button>
+        </div>
+      </div>
+
+      <!-- AI Camera Angle & Dual Video Auto-Alignment Bar (Always Visible) -->
+      <div class="glass-panel rounded-xl px-3.5 py-2.5 border border-emerald-500/30 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <div id="ai-align-status-badge" class="px-2.5 py-1 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono text-xs font-bold flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            🤖 AI АВТО-ВЫРАВНИВАНИЕ РАКУРСА И ВИДЕО АКТИВНО (96%)
+          </div>
+          <span id="ai-angle-metrics-text" class="text-slate-300 font-mono text-xs">
+            Камера видео: <strong class="text-sky-300">Yaw -43.5° / Pitch 12.4° / Крен +2.8°</strong> → <strong class="text-emerald-300">Скомпенсировано ΔYaw +15.5°, Масштаб 112%, Δt -0.14с</strong>
+          </span>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <label class="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-white font-semibold" title="Автоматически выравнивает неидеальный угол камеры, наклон, масштаб и точку удара между эталоном и вашим видео">
+            <input type="checkbox" id="chk-ai-auto-align" checked onchange="toggleAIAutoAlign(this.checked)" class="accent-emerald-400 rounded" />
+            <span>🤖 AI Выравнивание угла и масштаба</span>
+          </label>
+          <label class="inline-flex items-center gap-1.5 cursor-pointer text-sky-300 hover:text-white font-semibold" title="Показывает 3D-стробоскоп движения стоп, коленей и ракетки">
+            <input type="checkbox" id="chk-motion-strobe" checked onchange="toggleMotionStrobe(this.checked)" class="accent-sky-400 rounded" />
+            <span>👻 3D-след движения (Стробоскоп)</span>
+          </label>
+          <button onclick="runAIAutoAlignVideos()" class="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition shadow">
+            ⚡ AI Авто-синхр. (Угол + T2)
           </button>
         </div>
       </div>
@@ -616,6 +643,7 @@
 
   <!-- External Script Logic -->
   <script src="js/strokes3d.js"></script>
+  <script src="js/ai_pose_align.js"></script>
   <script src="js/viewer3d.js"></script>
   <script src="js/app.js"></script>
 </body>
