@@ -5,7 +5,7 @@
 const AppState = {
   currentTab: 'overlay',
   overlay: {
-    mode: 'ghost',
+    mode: 'split',
     alpha: 0.50,
     curtainX: 0.50,
     isPlaying: true,
@@ -128,6 +128,12 @@ const RALLY_DATA = {
 document.addEventListener('DOMContentLoaded', () => {
   init3DViewerAndVideo();
   renderAceCueSidebar();
+  if (typeof updateSidebarWithLiveVideoMetrics === 'function') {
+    updateSidebarWithLiveVideoMetrics();
+  }
+  if (typeof renderCauseAndEffectStrip === 'function') {
+    renderCauseAndEffectStrip();
+  }
   initHeatmapModule();
   initFootworkModule();
   initTelemetryModule();

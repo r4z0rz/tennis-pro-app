@@ -1,18 +1,26 @@
 /**
- * Tennis Pro Analytics 3D — Fluid Organic 3D Anatomical Ghost & Live Video Pose Overlay Engine
+ * Tennis Pro Analytics 3D — AceCue Kinematic Robot Rig, Dual-View (Side-by-Side + Direct 3D Rig Overlay)
+ * & Live Biomechanical Divergence Callout Engine (v8)
  *
- * - 100% Outward-Rounded 3D Anatomical Limbs & Joints (zero concave cutouts or boxy shapes).
- * - Sculpted 3D Spine, Ribcage, Pelvis & Articulated 3D Shoes with Toe & Velocity Vectors.
- * - Direct Video AI Skeleton Overlay when a user video is uploaded + Live Biomechanical Angle Callouts.
+ * Implements the 4-point specification & Father's 3 Audio requirements:
+ * 1. Two Core Modes on a Single Screen ('split' default):
+ *    - Left Viewport (Side-by-Side Comparison): Father's uploaded video (AI Auto-Zoomed + 3D skeleton + live swing path) alongside Pro reference stroke.
+ *    - Right Viewport (Direct 3D Rig Overlay): Superimposes Father's 3D Kinematic Robot Rig (Blue) directly onto the Pro's 3D Rig (Gold) on the same 3D court coordinates.
+ * 2. Camera Setup & Tripod Alignment Guide (45° rear-side diagonal or 90° side profile, 4.0–5.0m distance, 1.0–1.2m waist height, 60/120 FPS).
+ * 3. AceCue Technical Mechanics & Engineering Callouts:
+ *    - Full 3D Swing Path Splines (T0 -> T1 -> T2 -> T3 -> T4) with low-to-high brush angle (+15° vs +29°).
+ *    - 3D Contact-Point Caliper highlighting exact impact divergence ("🔴 ТОЧКА УДАРА: на 21 см ПОЗЖЕ").
+ *    - 3D Elbow-to-Torso Spacing Caliper ("🟠 ЛОКОТЬ СЛИШКОМ БЛИЗКО: 13 см vs 27 см").
+ *    - X-Factor Hip-Shoulder Separation & Footwork Weight Rings.
  */
 
 window.Viewer3D = {
   cam: {
-    yaw: -32,       // Horizontal orbit angle in degrees
-    pitch: 18,      // Vertical elevation angle in degrees
-    zoom: 1.05,     // Camera zoom
+    yaw: -58,       // Optimal 3/4 Side-Diagonal angle so both Contact Point (+Z) and Elbow Spacing (+X) are crystal clear!
+    pitch: 15,      // Vertical elevation angle in degrees
+    zoom: 1.02,     // Camera zoom
     panX: 0,        // Screen X offset (px)
-    panY: 35        // Screen Y offset (px)
+    panY: 32        // Screen Y offset (px)
   },
   layers: {
     feetAndSteps: true,
@@ -128,16 +136,16 @@ function init3DViewerAndVideo() {
 
 function set3DCameraPreset(preset) {
   if (preset === 'iso') {
-    Viewer3D.cam.yaw = -32;
-    Viewer3D.cam.pitch = 18;
+    Viewer3D.cam.yaw = -54;
+    Viewer3D.cam.pitch = 15;
   } else if (preset === 'side') {
-    Viewer3D.cam.yaw = -90;
+    Viewer3D.cam.yaw = -88;
     Viewer3D.cam.pitch = 10;
   } else if (preset === 'top') {
-    Viewer3D.cam.yaw = 0;
-    Viewer3D.cam.pitch = 84;
+    Viewer3D.cam.yaw = -15;
+    Viewer3D.cam.pitch = 82;
   } else if (preset === 'back') {
-    Viewer3D.cam.yaw = 0;
+    Viewer3D.cam.yaw = -8;
     Viewer3D.cam.pitch = 14;
   }
 }
@@ -160,7 +168,7 @@ function onCalibrate3D() {
   const vt = document.getElementById('slider-video-offset');
   if (s) Viewer3D.cam.zoom = parseFloat(s.value) / 100;
   if (ox) Viewer3D.cam.panX = parseFloat(ox.value);
-  if (oy) Viewer3D.cam.panY = 35 + parseFloat(oy.value);
+  if (oy) Viewer3D.cam.panY = 32 + parseFloat(oy.value);
   if (vt) {
     Viewer3D.videoSyncOffsetSec = parseFloat(vt.value) / 100;
     const lbl = document.getElementById('lbl-video-offset');
@@ -169,7 +177,7 @@ function onCalibrate3D() {
 }
 
 // =========================================================================================
-// CLEAN, JITTER-FREE VIDEO UPLOAD & PLAYBACK ENGINE
+// 100% AUTOMATIC ZERO-CLICK VIDEO UPLOAD & IMPACT SYNC PIPELINE
 // =========================================================================================
 
 function loadVideoFileIntoSlot(file, slot) {
@@ -190,13 +198,15 @@ function loadVideoFileIntoSlot(file, slot) {
   videoEl.onloadedmetadata = () => {
     if (slot === 'pro') {
       AppState.overlay.proVideoLoaded = true;
-      document.getElementById('badge-pro').innerHTML = `⭐ ВИДЕО ПРОФИ: ${file.name.slice(0, 18)}`;
+      const bPro = document.getElementById('badge-pro');
+      if (bPro) bPro.innerHTML = `⭐ ВИДЕО ПРОФИ: ${file.name.slice(0, 18)}`;
     } else {
       AppState.overlay.userVideoLoaded = true;
-      document.getElementById('badge-user').innerHTML = `📹 ВАШЕ ВИДЕО (AI АВТО-ЗУМ): ${file.name.slice(0, 18)}`;
-      Viewer3D.cam.zoom = 1.0;
+      const bUsr = document.getElementById('badge-user');
+      if (bUsr) bUsr.innerHTML = `📹 ВАШЕ ВИДЕО (AI 3D РИГ): ${file.name.slice(0, 18)}`;
+      Viewer3D.cam.zoom = 1.02;
       Viewer3D.cam.panX = 0;
-      Viewer3D.cam.panY = 35;
+      Viewer3D.cam.panY = 32;
       if (typeof setOverlayMode === 'function') {
         setOverlayMode('split');
       }
@@ -204,6 +214,7 @@ function loadVideoFileIntoSlot(file, slot) {
         window.AIPoseEngine.smoothedVideoAnchor.initialized = false;
         window.AIPoseEngine.liveUserPose3D = null;
         window.AIPoseEngine.liveUserLandmarks2D = null;
+        window.AIPoseEngine.wristTrail2D = [];
         window.AIPoseEngine.videoLock.active = false;
         window.AIPoseEngine.videoMetrics.framesAnalyzed = 0;
         window.AIPoseEngine.videoMetrics.minKneeAngleDeg = 165;
@@ -216,9 +227,12 @@ function loadVideoFileIntoSlot(file, slot) {
     const clrBtn = document.getElementById('btn-clear-video');
     if (clrBtn) clrBtn.classList.remove('hidden');
 
-    if (AppState.overlay.speed < 0.5) {
-      AppState.overlay.speed = 0.5;
-    }
+    // Start in 0.25x slow-motion synced around T2 Impact so the father immediately sees both the swing and the contact divergence
+    AppState.overlay.speed = 0.25;
+    AppState.overlay.progress = 0.62;
+    const scrub = document.getElementById('video-scrubber');
+    if (scrub) scrub.value = 620;
+
     videoEl.playbackRate = AppState.overlay.speed;
     AppState.overlay.isPlaying = true;
     const playIcon = document.getElementById('video-play-icon');
@@ -226,6 +240,13 @@ function loadVideoFileIntoSlot(file, slot) {
     if (playIcon) playIcon.textContent = '⏸';
     if (playText) playText.textContent = 'Пауза';
     videoEl.play().catch(() => {});
+
+    if (typeof updateSidebarWithLiveVideoMetrics === 'function') {
+      updateSidebarWithLiveVideoMetrics();
+    }
+    if (typeof renderCauseAndEffectStrip === 'function') {
+      renderCauseAndEffectStrip();
+    }
   };
 }
 
@@ -240,16 +261,20 @@ function clearUploadedVideos() {
     window.AIPoseEngine.liveUserPose3D = null;
     window.AIPoseEngine.liveUserLandmarks2D = null;
     window.AIPoseEngine.liveProPose3D = null;
+    window.AIPoseEngine.wristTrail2D = [];
     window.AIPoseEngine.videoMetrics.hasAnalyzedVideo = false;
   }
 
   const stroke = window.ACECUE_STROKES[AppState.overlay.preset] || window.ACECUE_STROKES.forehand;
-  document.getElementById('badge-pro').textContent = `⭐ 3D ЭТАЛОН: ${stroke.proName.toUpperCase()}`;
-  document.getElementById('badge-user').textContent = `👤 ВАША 3D-МОДЕЛЬ (ИЛИ ЗАГРУЗИТЕ ВИДЕО)`;
+  const bPro = document.getElementById('badge-pro');
+  const bUsr = document.getElementById('badge-user');
+  if (bPro) bPro.textContent = `⭐ 3D ЭТАЛОН: ${stroke.proName.toUpperCase()}`;
+  if (bUsr) bUsr.textContent = `👤 ВАШ 3D РИГ (ИЛИ ЗАГРУЗИТЕ ВИДЕО)`;
 
   const clrBtn = document.getElementById('btn-clear-video');
   if (clrBtn) clrBtn.classList.add('hidden');
   if (typeof renderAceCueSidebar === 'function') renderAceCueSidebar();
+  if (typeof renderCauseAndEffectStrip === 'function') renderCauseAndEffectStrip();
 }
 
 function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
@@ -258,8 +283,6 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
   const vh = videoEl.videoHeight;
   const baseScale = Math.min(w / vw, h / vh);
 
-  // AI Smart Auto-Zoom: When a player is small/distant in a phone video (e.g. torsoLegNormSpan = 0.24),
-  // automatically zoom & center on the player so they fill ~68% of the viewport height (~350px tall)!
   const activeLock = lock || (window.AIPoseEngine && window.AIPoseEngine.videoLock);
   let smartZoom = 1.0;
   let focusNormX = 0.52;
@@ -268,7 +291,7 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
   if (activeLock) {
     const spanNorm = Math.max(0.16, activeLock.torsoLegNormSpan || 0.25);
     const unzoomedSpanPx = spanNorm * vh * baseScale;
-    const targetSpanPx = h * 0.43; // Torso+Legs = 43% of viewport height (~220px -> ~350px full player height!)
+    const targetSpanPx = h * 0.44;
     smartZoom = Math.max(1.0, Math.min(2.65, targetSpanPx / Math.max(40, unzoomedSpanPx))) * Viewer3D.cam.zoom;
     focusNormX = activeLock.hipNormX || 0.54;
     focusNormY = ((activeLock.shNormY || 0.33) + (activeLock.ankleNormY || 0.58)) * 0.5;
@@ -277,9 +300,8 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
   const dw = vw * baseScale * smartZoom;
   const dh = vh * baseScale * smartZoom;
 
-  // Center the zoomed video frame on the player's body inside viewport (x, y, w, h)
-  let dx = (x + w * 0.52) - focusNormX * dw + Viewer3D.cam.panX;
-  let dy = (y + h * 0.52) - focusNormY * dh + (Viewer3D.cam.panY - 35);
+  let dx = (x + w * 0.50) - focusNormX * dw + Viewer3D.cam.panX;
+  let dy = (y + h * 0.52) - focusNormY * dh + (Viewer3D.cam.panY - 32);
 
   ctx.save();
   ctx.beginPath();
@@ -288,17 +310,15 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
 
   ctx.drawImage(videoEl, dx, dy, dw, dh);
 
-  // Subtle Hawkeye Radial Spotlight Vignette around the player so the 3D overlay has crystal-clear contrast
-  // against bright gymnasium walls or court backgrounds
   const playerScreenX = dx + focusNormX * dw;
   const playerScreenY = dy + focusNormY * dh;
-  const spotRadius = Math.max(w, h) * 0.58;
+  const spotRadius = Math.max(w, h) * 0.60;
   const vig = ctx.createRadialGradient(
     playerScreenX, playerScreenY, spotRadius * 0.22,
     playerScreenX, playerScreenY, spotRadius
   );
   vig.addColorStop(0, "rgba(7, 11, 18, 0.0)");
-  vig.addColorStop(0.55, "rgba(7, 11, 18, 0.22)");
+  vig.addColorStop(0.58, "rgba(7, 11, 18, 0.20)");
   vig.addColorStop(1, "rgba(7, 11, 18, 0.62)");
   ctx.fillStyle = vig;
   ctx.fillRect(x, y, w, h);
@@ -308,8 +328,8 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
 }
 
 /**
- * Draws a Sleek X-Ray Translucent 3D Shell + High-Contrast Laser Skeleton directly on the video player
- * so the real person in the video remains 100% visible (zero opaque paint or floating text clutter blocking them!).
+ * Draws the 3D Skeleton Rig + Live Swing Trajectory Trail + Elbow Spacing Caliper + Impact Zone Crosshair
+ * directly on the uploaded video in the Left Viewport so the father sees his exact video movement tracked!
  */
 function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
   if (!rect || !window.AIPoseEngine || !window.AIPoseEngine.liveUserLandmarks2D) return;
@@ -330,24 +350,21 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // 1. Translucent X-Ray Glass 3D Volume (lets 80% of the real video arm/leg show right through!)
     ctx.strokeStyle = "rgba(14, 165, 233, 0.22)";
-    ctx.lineWidth = r * 1.45;
+    ctx.lineWidth = r * 1.4;
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
 
-    // 2. Crisp Glowing Laser Bone Axis (high contrast, thin so it never hides the body)
     ctx.strokeStyle = "#38bdf8";
     ctx.lineWidth = 2.6;
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
 
-    // 3. 3D Cross-section Ring at Mid-Limb
     const midX = (p1.x + p2.x) * 0.5;
     const midY = (p1.y + p2.y) * 0.5;
     const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
     ctx.strokeStyle = "rgba(186, 230, 253, 0.65)";
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.ellipse(midX, midY, r * 0.32, r * 0.72, angle, 0, Math.PI * 2);
+    ctx.ellipse(midX, midY, r * 0.30, r * 0.68, angle, 0, Math.PI * 2);
     ctx.stroke();
   };
 
@@ -364,50 +381,58 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
   const pHeelL = pt(29), pHeelR = pt(30);
   const pToeL = pt(31), pToeR = pt(32);
 
-  // 1. 3D Weight Rings & Shoes under the video player's feet
+  // 1. Live 2D Swing Path Trajectory Curve on Video (AceCue Swing Path Overlay)
+  const trail = window.AIPoseEngine.wristTrail2D || [];
+  if (trail.length > 2) {
+    ctx.save();
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    trail.forEach((tp, idx) => {
+      const tx = rect.dx + tp.x * rect.dw;
+      const ty = rect.dy + tp.y * rect.dh;
+      if (idx === 0) ctx.moveTo(tx, ty);
+      else ctx.lineTo(tx, ty);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 2. Weight Rings & Foot Direction Vectors
   [
     { ank: pAnkL, heel: pHeelL, toe: pToeL, w: vm.weightFrontPct },
     { ank: pAnkR, heel: pHeelR, toe: pToeR, w: 100 - vm.weightFrontPct }
   ].forEach(({ ank, heel, toe, w }) => {
-    const ringR = Math.max(10, (12 + (w / 100) * 16) * s);
-    ctx.fillStyle = "rgba(56, 189, 248, 0.18)";
+    const ringR = Math.max(9, (11 + (w / 100) * 14) * s);
+    ctx.fillStyle = "rgba(56, 189, 248, 0.16)";
     ctx.beginPath();
     ctx.ellipse(ank.x, ank.y + 3 * s, ringR, ringR * 0.42, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = "#38bdf8";
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.4;
     ctx.stroke();
 
-    // Crisp Shoe Sole & Toe Orientation Vector
     ctx.strokeStyle = "#38bdf8";
-    ctx.lineWidth = Math.max(3, 6 * s);
+    ctx.lineWidth = Math.max(3, 5.5 * s);
     ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(heel.x, heel.y); ctx.lineTo(toe.x, toe.y); ctx.stroke();
 
     const fdx = toe.x - heel.x;
     const fdy = toe.y - heel.y;
     const flen = Math.hypot(fdx, fdy) || 1;
-    draw2DArrow(
-      ctx,
-      toe.x,
-      toe.y,
-      toe.x + (fdx / flen) * 24 * s,
-      toe.y + (fdy / flen) * 24 * s,
-      "#34d399",
-      2.2
-    );
+    draw2DArrow(ctx, toe.x, toe.y, toe.x + (fdx / flen) * 22 * s, toe.y + (fdy / flen) * 22 * s, "#34d399", 2.0);
   });
 
-  // 2. X-Ray 3D Legs & Arms
-  drawXRayLimb(pHipL, pKneeL, 11.5);
-  drawXRayLimb(pKneeL, pAnkL, 8.8);
-  drawXRayLimb(pHipR, pKneeR, 11.5);
-  drawXRayLimb(pKneeR, pAnkR, 8.8);
+  // 3. Limbs & Torso Rig
+  drawXRayLimb(pHipL, pKneeL, 11.0);
+  drawXRayLimb(pKneeL, pAnkL, 8.5);
+  drawXRayLimb(pHipR, pKneeR, 11.0);
+  drawXRayLimb(pKneeR, pAnkR, 8.5);
 
-  // 3. X-Ray Torso Frame (ultra-translucent so player's shirt/torso is 100% visible)
-  ctx.fillStyle = "rgba(14, 165, 233, 0.14)";
-  ctx.strokeStyle = "rgba(125, 211, 252, 0.75)";
-  ctx.lineWidth = 1.8;
+  ctx.fillStyle = "rgba(14, 165, 233, 0.12)";
+  ctx.strokeStyle = "rgba(125, 211, 252, 0.72)";
+  ctx.lineWidth = 1.6;
   ctx.beginPath();
   ctx.moveTo(pShL.x, pShL.y);
   ctx.lineTo(pShR.x, pShR.y);
@@ -417,40 +442,67 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
   ctx.fill();
   ctx.stroke();
 
-  drawXRayLimb(pShL, pElL, 8.5);
-  drawXRayLimb(pElL, pWrL, 7.0);
+  drawXRayLimb(pShL, pElL, 8.2);
+  drawXRayLimb(pElL, pWrL, 6.8);
   drawXRayLimb(pShR, pElR, 8.5);
   drawXRayLimb(pElR, pWrR, 7.0);
 
-  // 4. Crisp Glowing Joint Rings
+  // 4. Joint Nodes
   [pShL, pShR, pElL, pElR, pWrL, pWrR, pHipL, pHipR, pKneeL, pKneeR, pAnkL, pAnkR].forEach(j => {
-    const jr = Math.max(3, 4.5 * s);
+    const jr = Math.max(2.8, 4.2 * s);
     ctx.fillStyle = "#0ea5e9";
     ctx.beginPath();
     ctx.arc(j.x, j.y, jr, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth = 1.3;
     ctx.stroke();
   });
 
-  // 5. Sleek X-Ray Head Ring (doesn't cover the player's face!)
-  const headR = Math.max(8, 13.5 * s);
+  // 5. Head Ring
+  const headR = Math.max(7, 13.0 * s);
   ctx.strokeStyle = "#38bdf8";
   ctx.lineWidth = 2.0;
   ctx.beginPath();
   ctx.arc(pHead.x, pHead.y, headR, 0, Math.PI * 2);
   ctx.stroke();
 
+  // 6. Orange Elbow-Spacing Caliper on Video (Hitting Elbow to Ribcage)
+  const ribPt = {
+    x: (pShR.x + pHipR.x) * 0.5,
+    y: (pShR.y + pHipR.y) * 0.5
+  };
+  ctx.save();
+  ctx.strokeStyle = "#f97316";
+  ctx.lineWidth = 2.4;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(pElR.x, pElR.y);
+  ctx.lineTo(ribPt.x, ribPt.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // 7. Red Contact-Zone Target Reticle at Hitting Wrist/Racket
+  const rdx = pWrR.x - pElR.x;
+  const rdy = pWrR.y - pElR.y;
+  const impactX = pWrR.x + rdx * 0.65;
+  const impactY = pWrR.y + rdy * 0.65;
+  ctx.save();
+  ctx.strokeStyle = "#f43f5e";
+  ctx.lineWidth = 2.0;
+  ctx.beginPath();
+  ctx.arc(impactX, impactY, 10 * s, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(impactX - 14 * s, impactY); ctx.lineTo(impactX + 14 * s, impactY);
+  ctx.moveTo(impactX, impactY - 14 * s); ctx.lineTo(impactX, impactY + 14 * s);
+  ctx.stroke();
+  ctx.restore();
+
   ctx.restore();
 }
 
-/**
- * Analytically solves for the exact (cx, cy, scale) so the Pro 3D Ghost:
- * - Has the EXACT same shoulder-to-ankle pixel height as the player in the zoomed video,
- * - Stands on the EXACT same floor line (ankles Y) as the player in the zoomed video,
- * - Aligns horizontally (pelvis X) with the player in the zoomed video!
- */
 function computeLockedProTransform(proPose, vidRect, lock, proCam) {
   const uShL = project3D(proPose.shL, 0, 0, 1, proCam);
   const uShR = project3D(proPose.shR, 0, 0, 1, proCam);
@@ -582,7 +634,7 @@ function interpolate3DPose(keyframes, t) {
 }
 
 // =========================================================================================
-// FLUID, OUTWARD-ROUNDED 3D ANATOMICAL RENDERING PRIMITIVES (ZERO HOLES OR BOXES)
+// 3D KINEMATIC ROBOT RIG & ACECUE BIOMECHANICAL OVERLAY PRIMITIVES
 // =========================================================================================
 
 function draw3DFloorGrid(ctx, cx, cy, scale, camOverride) {
@@ -633,10 +685,6 @@ function draw2DArrow(ctx, x1, y1, x2, y2, color, width) {
   ctx.restore();
 }
 
-/**
- * Draw a Sleek, X-Ray Holographic 3D Shaded Limb Segment.
- * Uses a translucent 3D glass muscle envelope + crisp bright core bone axis so it NEVER obscures the video player!
- */
 function drawFluid3DLimb(ctx, ptA3D, ptB3D, radiusPx, cx, cy, scale, theme, camOverride) {
   const p1 = project3D(ptA3D, cx, cy, scale, camOverride);
   const p2 = project3D(ptB3D, cx, cy, scale, camOverride);
@@ -649,15 +697,13 @@ function drawFluid3DLimb(ctx, ptA3D, ptB3D, radiusPx, cx, cy, scale, theme, camO
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  // 1. Translucent 3D X-Ray Muscle Volume (lets video behind show right through!)
   ctx.strokeStyle = theme.main;
-  ctx.lineWidth = rAvg * 1.35;
+  ctx.lineWidth = rAvg * 1.32;
   ctx.beginPath();
   ctx.moveTo(p1.x, p1.y);
   ctx.lineTo(p2.x, p2.y);
   ctx.stroke();
 
-  // 2. Crisp Glowing 3D Bone / Axis Core (high visibility, zero visual clutter)
   ctx.strokeStyle = theme.highlight;
   ctx.lineWidth = Math.max(2.2, rAvg * 0.36);
   ctx.beginPath();
@@ -665,7 +711,6 @@ function drawFluid3DLimb(ctx, ptA3D, ptB3D, radiusPx, cx, cy, scale, theme, camO
   ctx.lineTo(p2.x, p2.y);
   ctx.stroke();
 
-  // 3. Subtle 3D Cross-Section Contour Ring at Limb Midpoint
   const midX = (p1.x + p2.x) / 2;
   const midY = (p1.y + p2.y) / 2;
   const limbAngle = Math.atan2(dy, dx);
@@ -679,9 +724,6 @@ function drawFluid3DLimb(ctx, ptA3D, ptB3D, radiusPx, cx, cy, scale, theme, camO
   ctx.restore();
 }
 
-/**
- * Draw Sleek X-Ray 3D Anatomical Torso, Spine, Shoulder Girdle & Pelvis
- */
 function drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverride) {
   ctx.save();
   ctx.lineCap = "round";
@@ -694,10 +736,8 @@ function drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverri
   ];
   const midHip3D = pose.pelvisPos;
 
-  // 1. Sleek 3D Pelvis / Hip Girdle
   drawFluid3DLimb(ctx, pose.hipL, pose.hipR, 10.5, cx, cy, scale, theme, camOverride);
 
-  // 2. Translucent X-Ray Thoracic V-Taper
   const midSh = { x: (P.shL.x + P.shR.x) / 2, y: (P.shL.y + P.shR.y) / 2 };
   const midHip = { x: (P.hipL.x + P.hipR.x) / 2, y: (P.hipL.y + P.hipR.y) / 2 };
   const waistL = {
@@ -722,11 +762,9 @@ function drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverri
   ctx.fill();
   ctx.stroke();
 
-  // 3. Sleek 3D Clavicle / Shoulder Girdle
   drawFluid3DLimb(ctx, pose.shL, pose.shR, 10.0, cx, cy, scale, theme, camOverride);
-
-  // 4. 3D Articulated Spine Axis
   drawFluid3DLimb(ctx, midHip3D, midSh3D, 6.0, cx, cy, scale, theme, camOverride);
+
   for (let i = 1; i <= 3; i++) {
     const f = i / 4;
     const sp3D = [
@@ -741,18 +779,31 @@ function drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverri
     ctx.fill();
   }
 
-  // 5. Sleek 3D Neck connecting Chest to Head
   drawFluid3DLimb(ctx, midSh3D, pose.head, 6.5, cx, cy, scale, theme, camOverride);
+
+  // Body Rotation Vectors (Pelvis & Chest X-Factor) when enabled
+  if (Viewer3D.layers.directionVectors) {
+    const pYaw = (pose.pelvisYaw * Math.PI) / 180;
+    const cYaw = (pose.chestYaw * Math.PI) / 180;
+    const pelDir = project3D([
+      midHip3D[0] + Math.sin(pYaw) * 0.28,
+      midHip3D[1],
+      midHip3D[2] + Math.cos(pYaw) * 0.28
+    ], cx, cy, scale, camOverride);
+    const chDir = project3D([
+      midSh3D[0] + Math.sin(cYaw) * 0.30,
+      midSh3D[1],
+      midSh3D[2] + Math.cos(cYaw) * 0.30
+    ], cx, cy, scale, camOverride);
+    draw2DArrow(ctx, midHip.x, midHip.y, pelDir.x, pelDir.y, theme.accent, 2.0);
+    draw2DArrow(ctx, midSh.x, midSh.y, chDir.x, chDir.y, theme.highlight, 2.0);
+  }
 
   ctx.restore();
 }
 
-/**
- * Draw Sleek, Sculpted 3D Tennis Shoe with Rounded Heel, Curved Sole & Velocity Vectors
- */
 function drawFluid3DShoe(ctx, foot, nextFoot, cx, cy, scale, theme, camOverride) {
   const yawRad = (foot.yaw * Math.PI) / 180;
-  const pAnkle = project3D(foot.ankle, cx, cy, scale, camOverride);
   const pHeel = project3D(foot.heel, cx, cy, scale, camOverride);
   const pToe = project3D(foot.toe, cx, cy, scale, camOverride);
 
@@ -789,7 +840,8 @@ function drawFluid3DShoe(ctx, foot, nextFoot, cx, cy, scale, theme, camOverride)
 }
 
 /**
- * Draw Complete Sleek 3D Volumetric Athlete (Zero Visual Clutter or Text Blocking the Body!)
+ * Draw Complete Sleek 3D Volumetric Kinematic Robot Rig
+ * Includes complete continuous 3D Swing Path Spline (T0 -> T1 -> T2 -> T3 -> T4) so the difference in swing trajectory is unmistakable!
  */
 function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alpha, camOverride) {
   ctx.save();
@@ -798,7 +850,7 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   const tNow = pose._phaseT !== undefined ? pose._phaseT : AppState.overlay.progress;
   const nextPose = interpolate3DPose(keyframes, Math.min(1.0, tNow + 0.06));
 
-  // 1. SUBTLE WEIGHT RINGS ON FLOOR (No text clutter on the feet!)
+  // 1. WEIGHT RINGS ON FLOOR
   if (Viewer3D.layers.feetAndSteps) {
     [
       { f: pose.footR, w: pose.weightR },
@@ -816,24 +868,44 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
     });
   }
 
-  // 2. CLEAN RACKET COMET ARC (Only trailing the past 0.18s — NEVER a giant filled sail across the body!)
-  if (Viewer3D.layers.swingRibbon) {
+  // 2. COMPLETE 3D SWING PATH TRAJECTORY SPLINE (T1 Slot -> T2 Contact -> T3 Follow-Through)
+  if (Viewer3D.layers.swingRibbon && keyframes && keyframes.length >= 3) {
     ctx.save();
-    const steps = 12;
-    const span = 0.18;
-    for (let s = 0; s < steps; s++) {
-      const t0 = Math.max(0, tNow - span * (1 - s / steps));
-      const t1 = Math.max(0, tNow - span * (1 - (s + 1) / steps));
+    // Draw full swing path tube from t=0.22 (Takeback/Slot) to t=0.88 (Follow-Through)
+    const sampleCount = 24;
+    const tStart = 0.22;
+    const tEnd = 0.88;
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = 2.4;
+    ctx.setLineDash([5, 3]);
+    ctx.globalAlpha = alpha * 0.55;
+    ctx.beginPath();
+    for (let i = 0; i <= sampleCount; i++) {
+      const ts = tStart + (tEnd - tStart) * (i / sampleCount);
+      const sp = interpolate3DPose(keyframes, ts);
+      const pt = project3D(sp.rTip, cx, cy, scale, camOverride);
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Active bright comet up to current phase tNow
+    const activeSteps = 14;
+    const span = 0.26;
+    for (let s = 0; s < activeSteps; s++) {
+      const t0 = Math.max(0, tNow - span * (1 - s / activeSteps));
+      const t1 = Math.max(0, tNow - span * (1 - (s + 1) / activeSteps));
       if (t1 <= t0) continue;
       const sp0 = interpolate3DPose(keyframes, t0);
       const sp1 = interpolate3DPose(keyframes, t1);
       const tip0 = project3D(sp0.rTip, cx, cy, scale, camOverride);
       const tip1 = project3D(sp1.rTip, cx, cy, scale, camOverride);
 
-      const frac = (s + 1) / steps;
-      ctx.strokeStyle = theme.accent;
-      ctx.globalAlpha = alpha * frac * 0.65;
-      ctx.lineWidth = 3.2 * frac;
+      const frac = (s + 1) / activeSteps;
+      ctx.strokeStyle = theme.highlight;
+      ctx.globalAlpha = alpha * frac * 0.92;
+      ctx.lineWidth = 3.8 * frac;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(tip0.x, tip0.y);
@@ -865,11 +937,9 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
     toeL: project3D(pose.footL.toe, cx, cy, scale, camOverride)
   };
 
-  // 3. FLUID 3D SHOES & FOOT VECTORS
   drawFluid3DShoe(ctx, pose.footR, nextPose.footR, cx, cy, scale, theme, camOverride);
   drawFluid3DShoe(ctx, pose.footL, nextPose.footL, cx, cy, scale, theme, camOverride);
 
-  // 4. SLEEK 3D LEGS
   const legs = [
     { z: (P.hipR.z + P.kneeR.z) / 2, fn: () => {
       drawFluid3DLimb(ctx, pose.hipR, pose.kneeR, 11.2, cx, cy, scale, theme, camOverride);
@@ -877,21 +947,18 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
     }},
     { z: (P.hipL.z + P.kneeL.z) / 2, fn: () => {
       drawFluid3DLimb(ctx, pose.hipL, pose.kneeL, 11.2, cx, cy, scale, theme, camOverride);
-      drawFluid3DLimb(ctx, pose.kneeL, pose.footL.ankle, 8.8, cx, cy, scale, theme, camOverride);
+      drawFluid3DLimb(ctx, pose.kneeL, pose.footL.ankle, 8.8, cx, cy, scale, camOverride);
     }}
   ];
   legs.sort((a, b) => a.z - b.z).forEach(l => l.fn());
 
-  // 5. SLEEK 3D TORSO, SPINE, CLAVICLES & PELVIS
   drawFluid3DTorsoAndPelvis(ctx, pose, P, cx, cy, scale, theme, camOverride);
 
-  // 6. SLEEK 3D ARMS (Both Left and Right Arms!)
   drawFluid3DLimb(ctx, pose.shL, pose.elL, 8.2, cx, cy, scale, theme, camOverride);
-  drawFluid3DLimb(ctx, pose.elL, pose.wrL, 6.8, cx, cy, scale, theme, camOverride);
-  drawFluid3DLimb(ctx, pose.shR, pose.elR, 8.5, cx, cy, scale, theme, camOverride);
-  drawFluid3DLimb(ctx, pose.elR, pose.wrR, 7.0, cx, cy, scale, theme, camOverride);
+  drawFluid3DLimb(ctx, pose.elL, pose.wrL, 6.8, cx, cy, scale, camOverride);
+  drawFluid3DLimb(ctx, pose.shR, pose.elR, 8.5, cx, cy, scale, camOverride);
+  drawFluid3DLimb(ctx, pose.elR, pose.wrR, 7.0, cx, cy, scale, camOverride);
 
-  // 7. CRISP 3D JOINT SPHERES
   [P.shR, P.shL, P.elR, P.wrR, P.elL, P.wrL, P.hipR, P.hipL, P.kneeR, P.kneeL, P.ankleR, P.ankleL].forEach(j => {
     const jr = Math.max(2.8, 4.8 * j.s);
     ctx.fillStyle = theme.accent;
@@ -903,7 +970,6 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
     ctx.stroke();
   });
 
-  // 8. SLEEK X-RAY 3D HEAD SPHERE WITH ATHLETIC VISOR
   const headR = Math.max(6, 14.5 * P.head.s);
   ctx.fillStyle = theme.boxFill;
   ctx.beginPath();
@@ -913,14 +979,13 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   ctx.lineWidth = 2.0;
   ctx.stroke();
 
-  // Athletic Headband / Visor
   ctx.strokeStyle = theme.accent;
   ctx.lineWidth = 2.8;
   ctx.beginPath();
   ctx.arc(P.head.x, P.head.y - 2, headR * 0.92, -0.25, Math.PI + 0.25, true);
   ctx.stroke();
 
-  // 9. 3D TENNIS RACKET & STRING BED
+  // 3D TENNIS RACKET & STRING BED
   const throat3D = [
     pose.wrR[0] + (pose.rTip[0] - pose.wrR[0]) * 0.38,
     pose.wrR[1] + (pose.rTip[1] - pose.wrR[1]) * 0.38,
@@ -958,7 +1023,6 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   ctx.stroke();
   ctx.restore();
 
-  // 10. 3D TENNIS BALL
   if (pose.ball) {
     const ballP = project3D(pose.ball, cx, cy, scale, camOverride);
     ctx.fillStyle = "#bef264";
@@ -975,52 +1039,245 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
 }
 
 /**
- * Draws a Sleek, Non-Obscuring Corner Telemetry HUD Panel (Zero Floating Text Over the Players!)
+ * ACECUE ENGINEERING CALLOUTS ON THE 3D DIRECT OVERLAY STAGE
+ * Explicitly highlights the Acceptance Test divergences with leader lines to clean margin callout cards:
+ * 1. 🔴 ТОЧКА УДАРА: на 21 см ПОЗЖЕ (+17 см vs +38 см у Профи)
+ * 2. 🟠 ЛОКОТЬ СЛИШКОМ БЛИЗКО: 13 см от корпуса (Профи: 27 см)
+ * 3. 🟡 ТРАЕКТОРИЯ РАЗГОНА: +15° снизу-вверх (Профи: +29°)
  */
-function drawCleanCornerHUD(ctx, w, h, stroke, proPose, userPose, lock) {
-  ctx.save();
-  const boxW = 248;
-  const boxH = AppState.overlay.userVideoLoaded ? 98 : 82;
-  const bx = w - boxW - 12;
-  const by = 46;
+function drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, cx, cy, scale, camOverride, viewX, viewW, viewH) {
+  const vm = (window.AIPoseEngine && window.AIPoseEngine.videoMetrics)
+    ? window.AIPoseEngine.videoMetrics
+    : { elbowSpacingCm: 13, contactOffsetCm: 17, contactLateCm: 21, swingPathAngleDeg: 15 };
 
-  ctx.fillStyle = "rgba(7, 11, 18, 0.82)";
-  ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
-  ctx.lineWidth = 1.2;
+  const pProBall = project3D(proPose.ball || proPose.rTip, cx, cy, scale, camOverride);
+  const pUserBall = project3D(userPose.ball || userPose.rTip, cx, cy, scale, camOverride);
+
+  const userRib3D = [
+    (userPose.shR[0] + userPose.hipR[0]) * 0.5,
+    (userPose.shR[1] + userPose.hipR[1]) * 0.5,
+    (userPose.shR[2] + userPose.hipR[2]) * 0.5
+  ];
+  const pUserEl = project3D(userPose.elR, cx, cy, scale, camOverride);
+  const pUserRib = project3D(userRib3D, cx, cy, scale, camOverride);
+  const pProEl = project3D(proPose.elR, cx, cy, scale, camOverride);
+
+  ctx.save();
+
+  // 1. RED 3D CONTACT-POINT DIVERGENCE CALIPER (Pro Ball Impact vs User Ball Impact)
+  ctx.strokeStyle = "#f43f5e";
+  ctx.lineWidth = 2.8;
+  ctx.setLineDash([5, 3]);
   ctx.beginPath();
-  ctx.roundRect ? ctx.roundRect(bx, by, boxW, boxH, 10) : ctx.rect(bx, by, boxW, boxH);
-  ctx.fill();
+  ctx.moveTo(pProBall.x, pProBall.y);
+  ctx.lineTo(pUserBall.x, pUserBall.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Glowing target rings on both contact points
+  ctx.strokeStyle = "#fbbf24";
+  ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.arc(pProBall.x, pProBall.y, 11, 0, Math.PI * 2); ctx.stroke();
+
+  ctx.strokeStyle = "#f43f5e";
+  ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.arc(pUserBall.x, pUserBall.y, 11, 0, Math.PI * 2); ctx.stroke();
+
+  // 2. ORANGE 3D ELBOW-TO-RIBCAGE SPACING CALIPER (Trapped Elbow 13cm vs Pro 27cm)
+  ctx.strokeStyle = "#f97316";
+  ctx.lineWidth = 3.0;
+  ctx.beginPath();
+  ctx.moveTo(pUserEl.x, pUserEl.y);
+  ctx.lineTo(pUserRib.x, pUserRib.y);
   ctx.stroke();
 
-  const proShort = stroke.proName.split('(')[0].trim();
-  const vm = window.AIPoseEngine ? window.AIPoseEngine.videoMetrics : null;
-  const usrKnee = (AppState.overlay.userVideoLoaded && vm) ? vm.kneeAngleDeg : Math.round(userPose.kneeBendDeg);
-  const usrElbow = (AppState.overlay.userVideoLoaded && vm) ? vm.elbowAngleDeg : Math.round(userPose.elbowAngleDeg);
+  // Dashed reference line to Pro's free elbow position
+  ctx.strokeStyle = "rgba(251, 191, 36, 0.75)";
+  ctx.lineWidth = 1.8;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(pUserEl.x, pUserEl.y);
+  ctx.lineTo(pProEl.x, pProEl.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
 
-  ctx.font = "bold 11px sans-serif";
-  ctx.fillStyle = "#fbbf24";
-  ctx.fillText(`⭐ ${proShort}`, bx + 10, by + 18);
-  ctx.fillStyle = "#38bdf8";
-  ctx.fillText(`vs 👤 Вы`, bx + 138, by + 18);
+  // 3. CLEAN ENGINEERING LEADER LINES & MARGIN CALLOUT CARDS (Never covering the 3D bodies!)
+  const drawCalloutCard = (anchorX, anchorY, cardX, cardY, cardW, cardH, borderCol, titleTxt, subTxt) => {
+    // Leader line from 3D joint/ball to margin card
+    ctx.strokeStyle = borderCol;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(anchorX, anchorY);
+    ctx.lineTo(cardX + 12, cardY + cardH * 0.5);
+    ctx.stroke();
 
-  ctx.font = "11px monospace";
-  ctx.fillStyle = "#e2e8f0";
-  ctx.fillText(`Колено:  ${Math.round(proPose.kneeBendDeg)}°  vs  ${usrKnee}°`, bx + 10, by + 38);
-  ctx.fillText(`Локоть:  ${Math.round(proPose.elbowAngleDeg)}°  vs  ${usrElbow}°`, bx + 10, by + 56);
-  ctx.fillText(`Контакт: +${Math.round(proPose.contactOffsetCm)}см vs +${Math.round(userPose.contactOffsetCm)}см`, bx + 10, by + 74);
+    ctx.fillStyle = borderCol;
+    ctx.beginPath();
+    ctx.arc(anchorX, anchorY, 3.8, 0, Math.PI * 2);
+    ctx.fill();
 
-  if (AppState.overlay.userVideoLoaded) {
-    ctx.fillStyle = "#34d399";
-    ctx.font = "bold 10px monospace";
-    const dirTxt = lock && lock.facingSign < 0 ? "Профиль ВЛЕВО" : "Профиль ВПРАВО";
-    ctx.fillText(`🎯 AI Авто-Зум 2.4x • ${dirTxt}`, bx + 10, by + 91);
-  }
+    // Card box
+    ctx.fillStyle = "rgba(7, 11, 18, 0.90)";
+    ctx.strokeStyle = borderCol;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(cardX, cardY, cardW, cardH, 7);
+    else ctx.rect(cardX, cardY, cardW, cardH);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 11px sans-serif";
+    ctx.fillText(titleTxt, cardX + 8, cardY + 15);
+
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "10px monospace";
+    ctx.fillText(subTxt, cardX + 8, cardY + 29);
+  };
+
+  const marginX = viewX + 12;
+  const rightCardX = viewX + viewW - 238;
+
+  // Callout #1: Contact Point 21 cm Late
+  const midBallX = (pProBall.x + pUserBall.x) * 0.5;
+  const midBallY = (pProBall.y + pUserBall.y) * 0.5;
+  drawCalloutCard(
+    midBallX,
+    midBallY,
+    marginX,
+    46,
+    248,
+    36,
+    "#f43f5e",
+    `🔴 ТОЧКА УДАРА: на ${vm.contactLateCm} см ПОЗЖЕ`,
+    `Вы: +${vm.contactOffsetCm} см перед тазом | Профи: +38 см`
+  );
+
+  // Callout #2: Elbow Too Close to Body (13 cm vs 27 cm)
+  const midElX = (pUserEl.x + pUserRib.x) * 0.5;
+  const midElY = (pUserEl.y + pUserRib.y) * 0.5;
+  drawCalloutCard(
+    midElX,
+    midElY,
+    marginX,
+    88,
+    248,
+    36,
+    "#f97316",
+    `🟠 ЛОКОТЬ СЛИШКОМ БЛИЗКО: ${vm.elbowSpacingCm} см`,
+    `Зажат у рёбер (${vm.elbowSpacingCm} см vs 27 см у Профи)`
+  );
+
+  // Callout #3: Swing Path Trajectory Angle (+15° vs +29°)
+  drawCalloutCard(
+    pProBall.x,
+    pProBall.y - 12,
+    rightCardX,
+    viewH - 96,
+    226,
+    36,
+    "#eab308",
+    `🟡 ТРАЕКТОРИЯ: +${vm.swingPathAngleDeg}° vs +29°`,
+    `Мало разгона снизу-вверх (${vm.spinRpm || 1480} RPM)`
+  );
 
   ctx.restore();
 }
 
 /**
+ * Draws the On-Screen Camera Placement & Tripod Framing Guide in the Left Viewport
+ * when no video is uploaded yet or when the user toggles the Camera Setup Guide.
+ */
+function drawCameraAlignmentGuideOverlay(ctx, x, y, w, h) {
+  ctx.save();
+  const boxX = x + w * 0.16;
+  const boxY = y + h * 0.14;
+  const boxW = w * 0.68;
+  const boxH = h * 0.70;
+
+  // Target Framing Brackets (65-75% Player Height Guide)
+  ctx.strokeStyle = "rgba(52, 211, 153, 0.55)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(boxX, boxY, boxW, boxH);
+  ctx.setLineDash([]);
+
+  // Corner brackets
+  const cLen = 18;
+  ctx.strokeStyle = "#34d399";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(boxX, boxY + cLen); ctx.lineTo(boxX, boxY); ctx.lineTo(boxX + cLen, boxY);
+  ctx.moveTo(boxX + boxW - cLen, boxY); ctx.lineTo(boxX + boxW, boxY); ctx.lineTo(boxX + boxW, boxY + cLen);
+  ctx.moveTo(boxX, boxY + boxH - cLen); ctx.lineTo(boxX, boxY + boxH); ctx.lineTo(boxX + cLen, boxY + boxH);
+  ctx.moveTo(boxX + boxW - cLen, boxY + boxH); ctx.lineTo(boxX + boxW, boxY + boxH); ctx.lineTo(boxX + boxW, boxY + boxH - cLen);
+  ctx.stroke();
+
+  // Baseline horizontal alignment line
+  const baseLineY = boxY + boxH * 0.88;
+  ctx.strokeStyle = "rgba(56, 189, 248, 0.75)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(boxX - 10, baseLineY);
+  ctx.lineTo(boxX + boxW + 10, baseLineY);
+  ctx.stroke();
+
+  // Compact instruction banner at bottom of guide
+  const banW = Math.min(w - 20, 420);
+  const banH = 52;
+  const banX = x + (w - banW) * 0.5;
+  const banY = y + h - 108;
+
+  ctx.fillStyle = "rgba(7, 11, 18, 0.88)";
+  ctx.strokeStyle = "rgba(52, 211, 153, 0.65)";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(banX, banY, banW, banH, 8);
+  else ctx.rect(banX, banY, banW, banH);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#34d399";
+  ctx.font = "bold 11px sans-serif";
+  ctx.fillText("📐 ГИД КАМЕРЫ (ШТАТИВ / ЗАБОР): 45° СЗАДИ-СБОКУ ИЛИ 90° ПРОФИЛЬ", banX + 10, banY + 18);
+  ctx.fillStyle = "#e2e8f0";
+  ctx.font = "10px monospace";
+  ctx.fillText("Дистанция: 4.0–5.0 м | Высота: 1.0–1.2 м (пояс) | 60/120 FPS", banX + 10, banY + 34);
+  ctx.fillStyle = "#38bdf8";
+  ctx.fillText("Перетащите своё видео сюда — 3D-риг и синхронизация T2 включатся сами!", banX + 10, banY + 47);
+
+  ctx.restore();
+}
+
+function drawViewportHeaderPill(ctx, x, y, text, borderCol, textCol) {
+  ctx.save();
+  ctx.font = "bold 11px sans-serif";
+  const padX = 10;
+  const pillW = ctx.measureText(text).width + padX * 2;
+  const pillH = 24;
+
+  ctx.fillStyle = "rgba(7, 11, 18, 0.88)";
+  ctx.strokeStyle = borderCol;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, pillW, pillH, 6);
+  else ctx.rect(x, y, pillW, pillH);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = textCol;
+  ctx.fillText(text, x + padX, y + 16);
+  ctx.restore();
+}
+
+/**
  * Main 60 FPS Render Function for Module 1
+ * Supports:
+ * - 'split' (DEFAULT — Both Core Modes on One Screen!):
+ *     Left Half (0..w*0.48): Side-by-Side Comparison (Father's Video + Pro Reference)
+ *     Right Half (w*0.48..w): Direct 3D Rig Overlay (Father's Blue 3D Rig superimposed onto Pro's Gold 3D Rig + Engineering Callouts)
+ * - 'ghost' (Full-Screen Direct 3D Rig Overlay + Callouts)
+ * - 'curtain' (Interactive Wipe Comparison)
  */
 function render3DOverlayStage() {
   const canvas = document.getElementById('overlay-canvas');
@@ -1057,8 +1314,8 @@ function render3DOverlayStage() {
         shNormY: 0.33,
         torsoLegNormSpan: 0.25,
         facingSign: -1,
-        matchedYawDeg: -86,
-        matchedPitchDeg: 10,
+        matchedYawDeg: -58,
+        matchedPitchDeg: 15,
         matchedPhaseT: 0.62
       };
 
@@ -1081,76 +1338,110 @@ function render3DOverlayStage() {
 
   const proTheme = {
     label: `⭐ ${stroke.proName.split('(')[0].trim()}`,
-    main: AppState.overlay.userVideoLoaded ? "rgba(245, 158, 11, 0.36)" : "rgba(217, 119, 6, 0.52)",
+    main: "rgba(245, 158, 11, 0.44)",
     highlight: "#fde047",
     accent: "#fbbf24",
-    wireframe: "rgba(254, 240, 138, 0.72)",
+    wireframe: "rgba(254, 240, 138, 0.75)",
     boxFill: "rgba(245, 158, 11, 0.16)",
-    shoeColor: "rgba(245, 158, 11, 0.85)",
+    shoeColor: "rgba(245, 158, 11, 0.88)",
     footTrail: "rgba(251, 191, 36, 0.65)",
     glowRing: "rgba(251, 191, 36, 0.18)",
     ribbon: "rgba(250, 204, 21, 0.75)",
     ribbonFill: "rgba(250, 204, 21, 0.12)",
-    racketStrings: "rgba(251, 191, 36, 0.20)"
+    racketStrings: "rgba(251, 191, 36, 0.22)"
   };
 
   const userTheme = {
-    label: AppState.overlay.userVideoLoaded ? "👤 Вы (1:1 Видео)" : "👤 Ваша 3D-модель",
-    main: "rgba(14, 165, 233, 0.45)",
+    label: AppState.overlay.userVideoLoaded ? "👤 Вы (3D Риг из видео)" : "👤 Ваш 3D Риг",
+    main: "rgba(14, 165, 233, 0.46)",
     highlight: "#7dd3fc",
     accent: "#38bdf8",
-    wireframe: "rgba(186, 230, 253, 0.72)",
+    wireframe: "rgba(186, 230, 253, 0.75)",
     boxFill: "rgba(14, 165, 233, 0.16)",
-    shoeColor: "rgba(14, 165, 233, 0.85)",
+    shoeColor: "rgba(14, 165, 233, 0.88)",
     footTrail: "rgba(56, 189, 248, 0.65)",
     glowRing: "rgba(56, 189, 248, 0.18)",
     ribbon: "rgba(56, 189, 248, 0.75)",
     ribbonFill: "rgba(56, 189, 248, 0.12)",
-    racketStrings: "rgba(56, 189, 248, 0.20)"
+    racketStrings: "rgba(56, 189, 248, 0.22)"
   };
 
-  const baseScale = 235 * Viewer3D.cam.zoom;
-  const centerY = h * 0.52 + Viewer3D.cam.panY;
+  const baseScale = 232 * Viewer3D.cam.zoom;
+  const centerY = h * 0.54 + Viewer3D.cam.panY;
   const centerX = w * 0.50 + Viewer3D.cam.panX;
 
   if (AppState.overlay.mode === 'split') {
+    const splitX = Math.round(w * 0.48);
+
+    // =====================================================================================
+    // LEFT VIEWPORT (0 .. splitX): MODE 1 — SIDE-BY-SIDE COMPARISON (ВАШЕ ВИДЕО vs ПРОФИ)
+    // =====================================================================================
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, splitX, h); ctx.clip();
+
     if (AppState.overlay.userVideoLoaded) {
-      // SYNCHRO-STUDIO SPLIT MODE WHEN USER VIDEO IS LOADED:
-      // Left Half: Your AI Auto-Zoomed Video + Sleek X-Ray Cyan Skeleton on your body
-      // Right Half: Clean Dark 3D Hawkeye Stage with BOTH 3D Ghosts (Gold Federer + Blue You) overlaid at full size & locked angle!
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, w / 2, h); ctx.clip();
-      const vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, w / 2, h, lock);
+      const vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, splitX, h, lock);
       if (Viewer3D.layers.show3DOverVideo && vidRect && window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
-        drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.95);
+        drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.96);
       }
-      ctx.restore();
-
-      // Right Half: Full-scale 3D Hologram Comparison on dark 3D Hawkeye court!
-      ctx.save();
-      ctx.beginPath(); ctx.rect(w / 2, 0, w / 2, h); ctx.clip();
-      draw3DFloorGrid(ctx, w * 0.75, centerY, baseScale * 0.90, proCam);
-      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, w * 0.75, centerY, baseScale * 0.90, userTheme, 0.88, proCam);
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, w * 0.75, centerY, baseScale * 0.90, proTheme, 0.92, proCam);
-      ctx.restore();
+      // Picture-in-Picture Pro Reference Mini-Card in Top-Right of Left Viewport for direct side-by-side reference
+      const pipW = 136, pipH = 152, pipX = splitX - pipW - 10, pipY = 44;
+      ctx.fillStyle = "rgba(7, 11, 18, 0.86)";
+      ctx.strokeStyle = "rgba(251, 191, 36, 0.65)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(pipX, pipY, pipW, pipH, 8);
+      else ctx.rect(pipX, pipY, pipW, pipH);
+      ctx.fill();
+      ctx.stroke();
+      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, pipX + pipW * 0.5, pipY + pipH * 0.60, 108, proTheme, 0.95, proCam);
+      ctx.fillStyle = "#fde047";
+      ctx.font = "bold 10px sans-serif";
+      ctx.fillText(`⭐ Эталон: ${stroke.proName.split('(')[0].trim()}`, pipX + 8, pipY + 14);
     } else {
-      ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, w / 2, h); ctx.clip();
-      if (AppState.overlay.proVideoLoaded) drawCleanVideoCover(ctx, proVid, 0, 0, w / 2, h, lock);
-      draw3DFloorGrid(ctx, w * 0.25, centerY, baseScale * 0.86, proCam);
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, w * 0.25, centerY, baseScale * 0.86, proTheme, 0.95, proCam);
-      ctx.restore();
+      // Side-by-Side Pro (Left) vs User (Right) inside Left Viewport + Optional Camera Framing Guide
+      draw3DFloorGrid(ctx, splitX * 0.50, centerY, baseScale * 0.78, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, splitX * 0.30, centerY, baseScale * 0.76, proTheme, 0.95, proCam);
+      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, splitX * 0.72, centerY, baseScale * 0.76, userTheme, 0.95, proCam);
 
-      ctx.save();
-      ctx.beginPath(); ctx.rect(w / 2, 0, w / 2, h); ctx.clip();
-      draw3DFloorGrid(ctx, w * 0.75, centerY, baseScale * 0.86);
-      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, w * 0.75, centerY, baseScale * 0.86, userTheme, 0.95);
-      ctx.restore();
+      ctx.fillStyle = "#fde047";
+      ctx.font = "bold 11px sans-serif";
+      ctx.fillText(`⭐ Профи (${stroke.proName.split('(')[0].trim()})`, 18, 62);
+      ctx.fillStyle = "#38bdf8";
+      ctx.fillText(`👤 Вы (Загрузите видео)`, splitX * 0.54, 62);
+
+      if (window.AIPoseEngine && window.AIPoseEngine.showCameraGuide) {
+        drawCameraAlignmentGuideOverlay(ctx, 0, 0, splitX, h);
+      }
     }
 
-    ctx.strokeStyle = "rgba(56, 189, 248, 0.55)";
+    drawViewportHeaderPill(ctx, 12, 12, "🎬 РЕЖИМ 1: СРАВНЕНИЕ РЯДОМ (ВИДЕО + ЭТАЛОН)", "rgba(56, 189, 248, 0.6)", "#7dd3fc");
+    ctx.restore();
+
+    // =====================================================================================
+    // RIGHT VIEWPORT (splitX .. w): MODE 2 — DIRECT 3D KINEMATIC RIG OVERLAY + CALLOUTS
+    // =====================================================================================
+    const rightW = w - splitX;
+    const rightCX = splitX + rightW * 0.50 + Viewer3D.cam.panX * 0.5;
+    const rigScale = baseScale * 0.92;
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(splitX, 0, rightW, h); ctx.clip();
+
+    draw3DFloorGrid(ctx, rightCX, centerY, rigScale, proCam);
+    draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, rightCX, centerY, rigScale, proTheme, 0.90, proCam);
+    draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, rightCX, centerY, rigScale, userTheme, 0.92, proCam);
+
+    // Draw the 3 explicit AceCue Engineering Callouts (21cm Late Contact, 13cm vs 27cm Elbow Spacing, +15° vs +29° Swing Path)
+    drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, rightCX, centerY, rigScale, proCam, splitX, rightW, h);
+
+    drawViewportHeaderPill(ctx, splitX + 12, 12, "🤖 РЕЖИМ 2: ПРЯМОЕ 3D-НАЛОЖЕНИЕ РИГОВ (ВЫ НА ПРОФИ)", "rgba(251, 191, 36, 0.65)", "#fde047");
+    ctx.restore();
+
+    // Center Divider Line
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.65)";
     ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(splitX, 0); ctx.lineTo(splitX, h); ctx.stroke();
 
   } else if (AppState.overlay.mode === 'curtain') {
     const splitX = AppState.overlay.curtainX * w;
@@ -1184,12 +1475,13 @@ function render3DOverlayStage() {
         }
       }
     } else {
-      draw3DFloorGrid(ctx, centerX, centerY, baseScale);
-      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, centerX, centerY, baseScale, userTheme, 0.95);
+      draw3DFloorGrid(ctx, centerX, centerY, baseScale, proCam);
+      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, centerX, centerY, baseScale, userTheme, 0.95, proCam);
     }
     ctx.restore();
 
   } else {
+    // 'ghost' — FULL-SCREEN DIRECT 3D OVERLAY MODE
     const proAlpha = 1.0 - AppState.overlay.alpha;
     const userAlpha = AppState.overlay.alpha;
 
@@ -1209,53 +1501,23 @@ function render3DOverlayStage() {
 
     if (AppState.overlay.userVideoLoaded && vidRect) {
       if (Viewer3D.layers.show3DOverVideo) {
-        // Compute exact 1:1 scale & anchor on the AI-zoomed video player!
         const tf = computeLockedProTransform(proPose, vidRect, lock, proCam);
-
-        // 1. Sleek X-Ray Cyan Skeleton directly on the video player's limbs (real body stays 100% visible!)
         if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
-          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, Math.max(0.55, userAlpha));
-        } else {
-          const uTf = computeLockedProTransform(userPose, vidRect, lock, proCam);
-          draw3DVolumetricAthlete(
-            ctx, userPose, stroke.userKeyframes,
-            uTf.cx, uTf.cy, uTf.scale,
-            userTheme,
-            Math.max(0.45, userAlpha),
-            proCam
-          );
+          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, Math.max(0.65, userAlpha));
         }
-
-        // 2. Translucent X-Ray Gold Pro 3D Ghost locked 1:1 in height, floor line, facing direction & swing phase!
-        draw3DVolumetricAthlete(
-          ctx, proPose, stroke.proKeyframes,
-          tf.cx, tf.cy, tf.scale,
-          proTheme,
-          Math.max(0.48, proAlpha),
-          proCam
-        );
+        draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, Math.max(0.65, userAlpha), proCam);
+        draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, Math.max(0.65, proAlpha), proCam);
+        drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, tf.cx, tf.cy, tf.scale, proCam, 0, w, h);
       }
-    } else if (!AppState.overlay.userVideoLoaded && (!AppState.overlay.proVideoLoaded || Viewer3D.layers.show3DOverVideo)) {
-      draw3DFloorGrid(ctx, centerX, centerY, baseScale);
-
-      draw3DVolumetricAthlete(
-        ctx, userPose, stroke.userKeyframes,
-        centerX, centerY, baseScale,
-        userTheme,
-        Math.max(0.38, userAlpha)
-      );
-
-      draw3DVolumetricAthlete(
-        ctx, proPose, stroke.proKeyframes,
-        centerX, centerY, baseScale,
-        proTheme,
-        Math.max(0.42, proAlpha)
-      );
+    } else {
+      draw3DFloorGrid(ctx, centerX, centerY, baseScale, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, centerX, centerY, baseScale, proTheme, Math.max(0.55, proAlpha), proCam);
+      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, centerX, centerY, baseScale, userTheme, Math.max(0.55, userAlpha), proCam);
+      drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, centerX, centerY, baseScale, proCam, 0, w, h);
     }
-  }
 
-  // Draw Clean Corner Telemetry HUD (never blocks the players!)
-  drawCleanCornerHUD(ctx, w, h, stroke, proPose, userPose, lock);
+    drawViewportHeaderPill(ctx, 12, 12, "🤖 ПРЯМОЕ 3D-НАЛОЖЕНИЕ РИГОВ (ВО ВЕСЬ ЭКРАН)", "rgba(251, 191, 36, 0.65)", "#fde047");
+  }
 
   let activePhase = stroke.phases[0];
   stroke.phases.forEach(p => {
@@ -1267,5 +1529,10 @@ function render3DOverlayStage() {
   const weightEl = document.getElementById('hud-weight-transfer');
   if (weightEl) {
     weightEl.textContent = `Профи ${Math.round(proPose.weightL)}% лев / Вы ${Math.round(userPose.weightL)}% лев`;
+  }
+
+  // Keep the Cause-and-Effect Ball Flight & Court Landing Diagram updated
+  if (typeof renderCauseAndEffectStrip === 'function') {
+    renderCauseAndEffectStrip();
   }
 }

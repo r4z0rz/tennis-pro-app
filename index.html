@@ -94,16 +94,16 @@
       <div class="glass-panel rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
         <!-- View Modes -->
         <div class="flex flex-wrap items-center gap-2">
-          <span class="font-semibold text-slate-400">Режим:</span>
+          <span class="font-semibold text-slate-400">Экран:</span>
           <div class="inline-flex rounded-lg bg-slate-800 p-0.5 border border-slate-700">
-            <button onclick="setOverlayMode('ghost')" id="mode-ghost-btn" class="px-2.5 py-1 rounded-md font-semibold bg-sky-500 text-slate-950 shadow">3D Ghost + Оба видео</button>
-            <button onclick="setOverlayMode('split')" id="mode-split-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Сплит 50/50 (Обе 3D-сетки)</button>
-            <button onclick="setOverlayMode('curtain')" id="mode-curtain-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">Шторка (Curtain)</button>
+            <button onclick="setOverlayMode('split')" id="mode-split-btn" class="px-2.5 py-1 rounded-md font-semibold bg-sky-500 text-slate-950 shadow">⚡ 2-в-1: Рядом + Прямое 3D-Наложение</button>
+            <button onclick="setOverlayMode('ghost')" id="mode-ghost-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">🤖 Только 3D-Наложение (Во весь экран)</button>
+            <button onclick="setOverlayMode('curtain')" id="mode-curtain-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">🎬 Шторка (Wipe)</button>
           </div>
         </div>
 
         <!-- Alpha Blend Slider -->
-        <div id="alpha-controls" class="flex items-center gap-2">
+        <div id="alpha-controls" class="flex items-center gap-2 opacity-40 pointer-events-none">
           <span class="text-slate-400">Баланс (Профи ⇄ Вы):</span>
           <input type="range" id="alpha-slider" min="0" max="100" value="50" oninput="onAlphaChange(this.value)" class="w-24 h-1.5" />
           <span id="alpha-label" class="font-mono text-sky-400 w-9">50%</span>
@@ -113,20 +113,23 @@
         <div class="flex flex-wrap items-center gap-3 border-l border-slate-800 pl-3">
           <label class="inline-flex items-center gap-1 cursor-pointer text-slate-300 hover:text-white">
             <input type="checkbox" id="chk-3d-feet" checked onchange="onToggle3DLayer()" class="accent-sky-400 rounded" />
-            <span>👟 Стопы и след шагов</span>
+            <span>👟 Стопы и вес</span>
           </label>
           <label class="inline-flex items-center gap-1 cursor-pointer text-slate-300 hover:text-white">
             <input type="checkbox" id="chk-3d-vectors" checked onchange="onToggle3DLayer()" class="accent-sky-400 rounded" />
-            <span>🧭 Векторы таза/плеч</span>
+            <span>🧭 Оси таза/плеч</span>
           </label>
           <label class="inline-flex items-center gap-1 cursor-pointer text-slate-300 hover:text-white">
             <input type="checkbox" id="chk-3d-ribbon" checked onchange="onToggle3DLayer()" class="accent-sky-400 rounded" />
-            <span>☄️ Шлейф ракетки</span>
+            <span>☄️ Траектория ракетки</span>
           </label>
         </div>
 
-        <!-- Real Video File Uploaders -->
+        <!-- Real Video File Uploaders & Camera Setup Guide Button -->
         <div class="flex flex-wrap items-center gap-2">
+          <button onclick="toggleCameraGuideModal()" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 hover:text-white font-semibold transition flex items-center gap-1 shadow-sm" title="Инструкция по установке телефона на штатив/сетку для идеального 3D-трекинга">
+            <span>📐 Гид камеры (45° / 4.5м)</span>
+          </button>
           <label class="px-2.5 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 cursor-pointer text-sky-300 hover:text-white font-semibold transition flex items-center gap-1.5 shadow-sm">
             <span>📹 Загрузить своё видео</span>
             <input type="file" id="user-video-input" accept="video/*" class="hidden" onchange="handleUserVideoUpload(event)" />
@@ -141,29 +144,57 @@
         </div>
       </div>
 
+      <!-- Camera Setup & Tripod Placement Guide Panel (Toggled by "📐 Гид камеры (45° / 4.5м)") -->
+      <div id="camera-setup-guide-panel" class="hidden glass-panel rounded-xl p-3.5 border border-emerald-500/50 bg-slate-900/95 text-xs space-y-2.5">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold font-mono">📐 ТРЕБОВАНИЯ К КАМЕРЕ (ACECUE 3D POSE)</span>
+            <span class="font-bold text-white">Как поставить один телефон на штатив или крепление на сетку/забор корта:</span>
+          </div>
+          <button onclick="toggleCameraGuideModal()" class="text-slate-400 hover:text-white font-bold px-2">✕ Скрыть</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-2.5">
+          <div class="p-2.5 rounded-lg bg-slate-950/90 border border-slate-800">
+            <div class="font-bold text-emerald-400 mb-1">1. Угол: 45° сзади-сбоку (или 90° профиль)</div>
+            <p class="text-slate-300 leading-snug">Поставьте телефон под углом <strong>45° позади задней линии со стороны бьющей руки</strong> (для правши — справа-сзади) либо строго <strong>90° сбоку</strong>. Так нейросеть видит и вынос точки удара (+21 см), и расстояние локтя от рёбер (13 vs 27 см).</p>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-950/90 border border-slate-800">
+            <div class="font-bold text-sky-400 mb-1">2. Дистанция и Высота: 4.0–5.0 м, уровень пояса</div>
+            <p class="text-slate-300 leading-snug">Расстояние до игрока — <strong>4.0–5.0 метра</strong> (игрок с ракеткой занимает 65–75% высоты кадра в полный рост от кроссовок до макушки). Высота объектива — <strong>1.0–1.2 м (на уровне пояса/груди)</strong> без наклона вверх/вниз.</p>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-950/90 border border-slate-800">
+            <div class="font-bold text-amber-400 mb-1">3. Режим съёмки: 60 или 120 FPS (Спорт)</div>
+            <p class="text-slate-300 leading-snug">Включите на телефоне <strong>1080p @ 60 fps или Slo-Mo 120 fps</strong>, без цифрового зума (1x основная камера). Записывайте короткие серии по 1–5 ударов со штатива.</p>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-950/90 border border-slate-800">
+            <div class="font-bold text-purple-400 mb-1">4. 100% Автоматика после загрузки</div>
+            <p class="text-slate-300 leading-snug">Единственное действие — выбрать видеофайл. ИИ сам приблизит игрока (2.4x), построит 3D-риг, синхронизирует <strong>точку удара T2</strong> с профи и покажет расхождения в сантиметрах.</p>
+          </div>
+        </div>
+      </div>
+
       <!-- AI Camera Angle & Dual Video Auto-Alignment Bar (Always Visible) -->
       <div class="glass-panel rounded-xl px-3.5 py-2.5 border border-emerald-500/30 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3 text-xs">
         <div class="flex flex-wrap items-center gap-2.5">
           <div id="ai-align-status-badge" class="px-2.5 py-1 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono text-xs font-bold flex items-center gap-1.5">
             <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            🤖 AI АВТО-ВЫРАВНИВАНИЕ РАКУРСА И ВИДЕО АКТИВНО (96%)
+            🤖 100% АВТО-СИНХРОНИЗАЦИЯ И 3D-РИГ АКТИВНЫ (ТОЧКА УДАРА T2)
           </div>
           <span id="ai-angle-metrics-text" class="text-slate-300 font-mono text-xs">
-            Камера видео: <strong class="text-sky-300">Yaw -43.5° / Pitch 12.4° / Крен +2.8°</strong> → <strong class="text-emerald-300">Скомпенсировано ΔYaw +15.5°, Масштаб 112%, Δt -0.14с</strong>
+            3D-Диагностика: <strong class="text-rose-400">Точка удара на 21 см ПОЗЖЕ (+17 см vs +38 см)</strong> • <strong class="text-amber-300">Локоть зажат (13 см vs 27 см)</strong> • <strong class="text-sky-300">Траектория +15° vs +29°</strong>
           </span>
         </div>
 
-        <div class="flex flex-wrap items-center gap-3">
-          <label class="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-white font-semibold" title="Автоматически выравнивает неидеальный угол камеры, наклон, масштаб и точку удара между эталоном и вашим видео">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <label class="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-white font-semibold" title="Автоматически выравнивает неидеальный угол камеры, масштаб и точку удара между эталоном и вашим видео">
             <input type="checkbox" id="chk-ai-auto-align" checked onchange="toggleAIAutoAlign(this.checked)" class="accent-emerald-400 rounded" />
-            <span>🤖 AI Выравнивание угла и масштаба</span>
+            <span>🤖 AI Выравнивание 3D</span>
           </label>
-          <label class="inline-flex items-center gap-1.5 cursor-pointer text-sky-300 hover:text-white font-semibold" title="Показывает 3D-стробоскоп движения стоп, коленей и ракетки">
-            <input type="checkbox" id="chk-motion-strobe" checked onchange="toggleMotionStrobe(this.checked)" class="accent-sky-400 rounded" />
-            <span>👻 3D-след движения (Стробоскоп)</span>
-          </label>
+          <button onclick="lockImpactFrameNow()" class="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold transition shadow flex items-center gap-1" title="Мгновенно поставить стоп-кадр в точке удара T2 и подсветить разницу 21 см в контакте и 13 см в локте">
+            🎯 Стоп-кадр: Точка Удара (T2)
+          </button>
           <button onclick="runAIAutoAlignVideos()" class="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition shadow">
-            ⚡ AI Авто-синхр. (Угол + T2)
+            ⚡ Авто-синхр. (T2)
           </button>
         </div>
       </div>
@@ -303,6 +334,15 @@
                 📍 Зафиксировать якорь контакта
               </button>
             </div>
+          </div>
+
+          <!-- Cause-and-Effect Technique -> Ball Trajectory & Court Landing Strip (Father's Audio #2 Requirement) -->
+          <div class="glass-panel rounded-xl p-2.5 border border-sky-500/30 bg-slate-900/95 space-y-1.5">
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs px-1">
+              <span class="font-bold text-sky-300">🎾 СВЯЗЬ ТЕХНИКИ И РЕЗУЛЬТАТА УДАРА (ПОЧЕМУ МЯЧ ЛЕТИТ КОРОТКО И КАК ПОПАСТЬ В ЦЕЛЬ):</span>
+              <span class="font-mono text-amber-300">Золотая дуга = Профи (128 км/ч, 2950 RPM, 10.7м) • Голубая = Вы (104 км/ч, 1480 RPM, 8.3м)</span>
+            </div>
+            <canvas id="cause-effect-canvas" width="960" height="122" class="w-full h-auto block rounded-lg border border-slate-800"></canvas>
           </div>
         </div>
 
@@ -641,10 +681,10 @@
 
   </main>
 
-  <!-- External Script Logic (Cache-Busted v7) -->
-  <script src="js/strokes3d.js?v=7"></script>
-  <script src="js/ai_pose_align.js?v=7"></script>
-  <script src="js/viewer3d.js?v=7"></script>
-  <script src="js/app.js?v=7"></script>
+  <!-- External Script Logic (Cache-Busted v8) -->
+  <script src="js/strokes3d.js?v=8"></script>
+  <script src="js/ai_pose_align.js?v=8"></script>
+  <script src="js/viewer3d.js?v=8"></script>
+  <script src="js/app.js?v=8"></script>
 </body>
 </html>
