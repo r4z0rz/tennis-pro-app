@@ -215,6 +215,8 @@ function loadVideoFileIntoSlot(file, slot) {
         window.AIPoseEngine.liveUserPose3D = null;
         window.AIPoseEngine.liveUserLandmarks2D = null;
         window.AIPoseEngine.wristTrail2D = [];
+        window.AIPoseEngine.racketTipTrail2D = [];
+        window.AIPoseEngine.liveRacket2D = null;
         window.AIPoseEngine.videoLock.active = false;
         window.AIPoseEngine.videoMetrics.framesAnalyzed = 0;
         window.AIPoseEngine.videoMetrics.minKneeAngleDeg = 165;
@@ -381,21 +383,63 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
   const pHeelL = pt(29), pHeelR = pt(30);
   const pToeL = pt(31), pToeR = pt(32);
 
-  // 1. Live 2D Swing Path Trajectory Curve on Video (AceCue Swing Path Overlay)
-  const trail = window.AIPoseEngine.wristTrail2D || [];
-  if (trail.length > 2) {
+  // 1. Live 2D Racket Tip & Wrist Swing Path Ribbon on Video (AceCue Racket Tracking Overlay)
+  const rTrail = window.AIPoseEngine.racketTipTrail2D || [];
+  if (rTrail.length > 1) {
     ctx.save();
-    ctx.strokeStyle = "#38bdf8";
-    ctx.lineWidth = 3.2;
+    // Translucent swept racket ribbon between wrist and racket tip
+    for (let i = 0; i < rTrail.length - 1; i++) {
+      const a = rTrail[i];
+      const b = rTrail[i + 1];
+      const frac = (i + 1) / rTrail.length;
+      ctx.fillStyle = `rgba(163, 230, 53, ${0.04 + frac * 0.14})`;
+      ctx.beginPath();
+      ctx.moveTo(rect.dx + a.wrX * rect.dw, rect.dy + a.wrY * rect.dh);
+      ctx.lineTo(rect.dx + a.tipX * rect.dw, rect.dy + a.tipY * rect.dh);
+      ctx.lineTo(rect.dx + b.tipX * rect.dw, rect.dy + b.tipY * rect.dh);
+      ctx.lineTo(rect.dx + b.wrX * rect.dw, rect.dy + b.wrY * rect.dh);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Glowing Neon Lime Racket-Head Tip Trajectory Curve + Strobe Dots
+    ctx.strokeStyle = "#a3e635";
+    ctx.lineWidth = 3.4;
     ctx.lineCap = "round";
     ctx.beginPath();
-    trail.forEach((tp, idx) => {
-      const tx = rect.dx + tp.x * rect.dw;
-      const ty = rect.dy + tp.y * rect.dh;
+    rTrail.forEach((tp, idx) => {
+      const tx = rect.dx + tp.tipX * rect.dw;
+      const ty = rect.dy + tp.tipY * rect.dh;
       if (idx === 0) ctx.moveTo(tx, ty);
       else ctx.lineTo(tx, ty);
     });
     ctx.stroke();
+
+    // Wrist trajectory curve in Cyan
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 2.0;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    rTrail.forEach((tp, idx) => {
+      const wx = rect.dx + tp.wrX * rect.dw;
+      const wy = rect.dy + tp.wrY * rect.dh;
+      if (idx === 0) ctx.moveTo(wx, wy);
+      else ctx.lineTo(wx, wy);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Strobe markers along the racket tip trajectory
+    rTrail.forEach((tp, idx) => {
+      if (idx % 3 === 0 || idx === rTrail.length - 1) {
+        const tx = rect.dx + tp.tipX * rect.dw;
+        const ty = rect.dy + tp.tipY * rect.dh;
+        ctx.fillStyle = idx === rTrail.length - 1 ? "#ffffff" : "#bef264";
+        ctx.beginPath();
+        ctx.arc(tx, ty, idx === rTrail.length - 1 ? 4.5 : 2.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
     ctx.restore();
   }
 
@@ -483,21 +527,91 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
   ctx.setLineDash([]);
   ctx.restore();
 
-  // 7. Red Contact-Zone Target Reticle at Hitting Wrist/Racket
-  const rdx = pWrR.x - pElR.x;
-  const rdy = pWrR.y - pElR.y;
-  const impactX = pWrR.x + rdx * 0.65;
-  const impactY = pWrR.y + rdy * 0.65;
+  // 7. Full Tracked Tennis Racket (Handle, Throat, String Hoop, Sweet-Spot Reticle & Face Normal Vector) on Video!
+  const rk = window.AIPoseEngine.liveRacket2D;
+  const rWr = rk
+    ? { x: rect.dx + rk.wrist.x * rect.dw, y: rect.dy + rk.wrist.y * rect.dh }
+    : pWrR;
+  const rThroat = rk
+    ? { x: rect.dx + rk.throat.x * rect.dw, y: rect.dy + rk.throat.y * rect.dh }
+    : { x: pWrR.x + (pWrR.x - pElR.x) * 0.45, y: pWrR.y + (pWrR.y - pElR.y) * 0.45 };
+  const rHoop = rk
+    ? { x: rect.dx + rk.hoop.x * rect.dw, y: rect.dy + rk.hoop.y * rect.dh }
+    : { x: pWrR.x + (pWrR.x - pElR.x) * 0.85, y: pWrR.y + (pWrR.y - pElR.y) * 0.85 };
+  const rTip = rk
+    ? { x: rect.dx + rk.tip.x * rect.dw, y: rect.dy + rk.tip.y * rect.dh }
+    : { x: pWrR.x + (pWrR.x - pElR.x) * 1.25, y: pWrR.y + (pWrR.y - pElR.y) * 1.25 };
+
   ctx.save();
+  // Racket Handle & Shaft
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(2.5, 4.0 * s);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(rWr.x, rWr.y);
+  ctx.lineTo(rThroat.x, rThroat.y);
+  ctx.stroke();
+
+  // Racket Hoop & Crossed String Grid
+  const rkAngle = Math.atan2(rTip.y - rThroat.y, rTip.x - rThroat.x);
+  const hoopRx = Math.max(12, Math.hypot(rTip.x - rThroat.x, rTip.y - rThroat.y) * 0.52);
+  const hoopRy = Math.max(8, hoopRx * 0.62);
+
+  ctx.save();
+  ctx.translate(rHoop.x, rHoop.y);
+  ctx.rotate(rkAngle);
+  ctx.fillStyle = "rgba(163, 230, 53, 0.20)";
+  ctx.strokeStyle = "#a3e635";
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, hoopRx, hoopRy, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // String bed grid lines inside hoop
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+  ctx.lineWidth = 1.0;
+  for (let gx = -hoopRx * 0.6; gx <= hoopRx * 0.61; gx += hoopRx * 0.4) {
+    ctx.beginPath(); ctx.moveTo(gx, -hoopRy * 0.78); ctx.lineTo(gx, hoopRy * 0.78); ctx.stroke();
+  }
+  for (let gy = -hoopRy * 0.5; gy <= hoopRy * 0.51; gy += hoopRy * 0.5) {
+    ctx.beginPath(); ctx.moveTo(-hoopRx * 0.82, gy); ctx.lineTo(hoopRx * 0.82, gy); ctx.stroke();
+  }
+  ctx.restore();
+
+  // Red Sweet-Spot Impact Crosshair on Racket Face + Racket Tip Node
   ctx.strokeStyle = "#f43f5e";
   ctx.lineWidth = 2.0;
   ctx.beginPath();
-  ctx.arc(impactX, impactY, 10 * s, 0, Math.PI * 2);
+  ctx.arc(rHoop.x, rHoop.y, 9 * s, 0, Math.PI * 2);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(impactX - 14 * s, impactY); ctx.lineTo(impactX + 14 * s, impactY);
-  ctx.moveTo(impactX, impactY - 14 * s); ctx.lineTo(impactX, impactY + 14 * s);
+  ctx.moveTo(rHoop.x - 13 * s, rHoop.y); ctx.lineTo(rHoop.x + 13 * s, rHoop.y);
+  ctx.moveTo(rHoop.x, rHoop.y - 13 * s); ctx.lineTo(rHoop.x, rHoop.y + 13 * s);
   ctx.stroke();
+
+  // Glowing Neon Racket Tip Tracker Node + Label Pill
+  ctx.fillStyle = "#a3e635";
+  ctx.beginPath();
+  ctx.arc(rTip.x, rTip.y, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(7, 11, 18, 0.85)";
+  ctx.strokeStyle = "#a3e635";
+  ctx.lineWidth = 1.2;
+  const tagX = Math.max(8, Math.min(rect.dx + rect.dw - 135, rTip.x + 8));
+  const tagY = Math.max(38, rTip.y - 22);
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(tagX, tagY, 128, 20, 5);
+  else ctx.rect(tagX, tagY, 128, 20);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#bef264";
+  ctx.font = "bold 10px monospace";
+  ctx.fillText(`🎾 РАКЕТКА: +${vm.swingPathAngleDeg}°`, tagX + 6, tagY + 14);
   ctx.restore();
 
   ctx.restore();
@@ -868,17 +982,40 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
     });
   }
 
-  // 2. COMPLETE 3D SWING PATH TRAJECTORY SPLINE (T1 Slot -> T2 Contact -> T3 Follow-Through)
+  // 2. COMPLETE 3D RACKET TRACKING & SWING PATH SPLINE (T0 -> T1 Slot -> T2 Contact -> T3 Follow-Through)
   if (Viewer3D.layers.swingRibbon && keyframes && keyframes.length >= 3) {
     ctx.save();
-    // Draw full swing path tube from t=0.22 (Takeback/Slot) to t=0.88 (Follow-Through)
-    const sampleCount = 24;
-    const tStart = 0.22;
-    const tEnd = 0.88;
+    const sampleCount = 26;
+    const tStart = 0.14;
+    const tEnd = 0.90;
+
+    // 2A. Translucent 3D Racket Sweep Ribbon (connecting Wrist path to Racket-Tip path)
+    for (let i = 0; i < sampleCount; i++) {
+      const ts0 = tStart + (tEnd - tStart) * (i / sampleCount);
+      const ts1 = tStart + (tEnd - tStart) * ((i + 1) / sampleCount);
+      const sp0 = interpolate3DPose(keyframes, ts0);
+      const sp1 = interpolate3DPose(keyframes, ts1);
+      const tip0 = project3D(sp0.rTip, cx, cy, scale, camOverride);
+      const tip1 = project3D(sp1.rTip, cx, cy, scale, camOverride);
+      const wr0 = project3D(sp0.wrR, cx, cy, scale, camOverride);
+      const wr1 = project3D(sp1.wrR, cx, cy, scale, camOverride);
+
+      ctx.fillStyle = theme.ribbonFill;
+      ctx.globalAlpha = alpha * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(wr0.x, wr0.y);
+      ctx.lineTo(tip0.x, tip0.y);
+      ctx.lineTo(tip1.x, tip1.y);
+      ctx.lineTo(wr1.x, wr1.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 2B. Full 3D Racket-Tip Trajectory Curve with Directional Arrows
     ctx.strokeStyle = theme.accent;
-    ctx.lineWidth = 2.4;
+    ctx.lineWidth = 2.6;
     ctx.setLineDash([5, 3]);
-    ctx.globalAlpha = alpha * 0.55;
+    ctx.globalAlpha = alpha * 0.72;
     ctx.beginPath();
     for (let i = 0; i <= sampleCount; i++) {
       const ts = tStart + (tEnd - tStart) * (i / sampleCount);
@@ -890,9 +1027,36 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Active bright comet up to current phase tNow
-    const activeSteps = 14;
-    const span = 0.26;
+    // 2C. Stroboscopic Ghost Rackets at Key Phases (T1 Slot Drop = 0.40, T2 Impact = 0.62, T3 Finish = 0.80)
+    [0.38, 0.52, 0.62].forEach((tGhost) => {
+      if (Math.abs(tGhost - tNow) < 0.04) return;
+      const gPose = interpolate3DPose(keyframes, tGhost);
+      const gWr = project3D(gPose.wrR, cx, cy, scale, camOverride);
+      const gTip = project3D(gPose.rTip, cx, cy, scale, camOverride);
+      const gHoop3D = [
+        gPose.wrR[0] + (gPose.rTip[0] - gPose.wrR[0]) * 0.69,
+        gPose.wrR[1] + (gPose.rTip[1] - gPose.wrR[1]) * 0.69,
+        gPose.wrR[2] + (gPose.rTip[2] - gPose.wrR[2]) * 0.69
+      ];
+      const gHoop = project3D(gHoop3D, cx, cy, scale, camOverride);
+      const gAng = Math.atan2(gTip.y - gWr.y, gTip.x - gWr.x);
+
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.36;
+      ctx.strokeStyle = theme.highlight;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(gWr.x, gWr.y); ctx.lineTo(gTip.x, gTip.y); ctx.stroke();
+      ctx.translate(gHoop.x, gHoop.y);
+      ctx.rotate(gAng);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, Math.max(6, 12 * gHoop.s), Math.max(4, 8 * gHoop.s), 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // 2D. Active High-Brightness Racket Tip Laser Comet up to current phase tNow
+    const activeSteps = 16;
+    const span = 0.28;
     for (let s = 0; s < activeSteps; s++) {
       const t0 = Math.max(0, tNow - span * (1 - s / activeSteps));
       const t1 = Math.max(0, tNow - span * (1 - (s + 1) / activeSteps));
@@ -904,8 +1068,8 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
 
       const frac = (s + 1) / activeSteps;
       ctx.strokeStyle = theme.highlight;
-      ctx.globalAlpha = alpha * frac * 0.92;
-      ctx.lineWidth = 3.8 * frac;
+      ctx.globalAlpha = alpha * frac * 0.96;
+      ctx.lineWidth = 4.2 * frac;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(tip0.x, tip0.y);
@@ -1014,14 +1178,41 @@ function draw3DVolumetricAthlete(ctx, pose, keyframes, cx, cy, scale, theme, alp
   ctx.rotate(rAngle);
   ctx.fillStyle = theme.racketStrings;
   ctx.strokeStyle = theme.accent;
-  ctx.lineWidth = 2.4;
-  const rx = Math.max(7, rLen);
-  const ry = Math.max(5, 12.5 * PHoop.s);
+  ctx.lineWidth = 2.6;
+  const rx = Math.max(9, rLen * 1.08);
+  const ry = Math.max(6, 13.5 * PHoop.s);
   ctx.beginPath();
   ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
+
+  // Crossed String Grid inside 3D Racket Head
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.38)";
+  ctx.lineWidth = 0.9;
+  for (let gx = -rx * 0.55; gx <= rx * 0.56; gx += rx * 0.36) {
+    ctx.beginPath(); ctx.moveTo(gx, -ry * 0.78); ctx.lineTo(gx, ry * 0.78); ctx.stroke();
+  }
+  for (let gy = -ry * 0.5; gy <= ry * 0.51; gy += ry * 0.5) {
+    ctx.beginPath(); ctx.moveTo(-rx * 0.80, gy); ctx.lineTo(rx * 0.80, gy); ctx.stroke();
+  }
   ctx.restore();
+
+  // 3D Racket Face Normal Arrow (shows exact racket face orientation & topspin brush angle at contact!)
+  if (pose.rFaceNormal) {
+    const normEnd3D = [
+      centerHoop3D[0] + pose.rFaceNormal[0] * 0.24,
+      centerHoop3D[1] + pose.rFaceNormal[1] * 0.24,
+      centerHoop3D[2] + pose.rFaceNormal[2] * 0.24
+    ];
+    const PNormEnd = project3D(normEnd3D, cx, cy, scale, camOverride);
+    draw2DArrow(ctx, PHoop.x, PHoop.y, PNormEnd.x, PNormEnd.y, theme.highlight, 2.2);
+  }
+
+  // Glowing Tracker Node on 3D Racket Tip
+  ctx.fillStyle = theme.highlight;
+  ctx.beginPath();
+  ctx.arc(P.rTip.x, P.rTip.y, Math.max(3.2, 4.5 * P.rTip.s), 0, Math.PI * 2);
+  ctx.fill();
 
   if (pose.ball) {
     const ballP = project3D(pose.ball, cx, cy, scale, camOverride);

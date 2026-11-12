@@ -44,6 +44,8 @@ window.AIPoseEngine = {
   liveUserPose3D: null,
   liveProPose3D: null,
   wristTrail2D: [],
+  racketTipTrail2D: [],
+  liveRacket2D: null,
   showCameraGuide: false,
   lockImpactMode: false,
 
@@ -348,16 +350,63 @@ function computeVideoLockAndMetrics(lm2d, lm3d) {
   const rawElbowSpacingCm = Math.round((elbowDistNorm / rawSpan) * 85);
   const elbowSpacingCm = Math.max(9, Math.min(25, rawElbowSpacingCm));
 
-  // Track wrist 2D trail for live swing-path visualization & low-to-high trajectory angle
+  // Track wrist + full tennis racket kinematics (grip, throat, hoop center, racket tip & face angle)
+  const activeHandIdx = isLeftActive ? 19 : 20; // index finger knuckle (19/20)
+  const activePinkyIdx = isLeftActive ? 17 : 18;
+  const handPt = lm2d[activeHandIdx] || activeWrist;
+  const pinkyPt = lm2d[activePinkyIdx] || activeWrist;
+
+  // Forearm + Hand direction vector for Racket Axis
+  let rDirX = (handPt.x - activeElbow.x) * 0.65 + (activeWrist.x - activeElbow.x) * 0.35;
+  let rDirY = (handPt.y - activeElbow.y) * 0.65 + (activeWrist.y - activeElbow.y) * 0.35;
+  const rDirLen = Math.hypot(rDirX, rDirY) || 0.001;
+  rDirX /= rDirLen;
+  rDirY /= rDirLen;
+
+  // In normalized image coordinates, a 68.5 cm (27-inch) tennis racket is ~0.58 * rawSpan long
+  const racketNormLen = rawSpan * 0.58;
+  const racketTipNorm = {
+    x: activeWrist.x + rDirX * racketNormLen,
+    y: activeWrist.y + rDirY * racketNormLen
+  };
+  const racketHoopNorm = {
+    x: activeWrist.x + rDirX * (racketNormLen * 0.68),
+    y: activeWrist.y + rDirY * (racketNormLen * 0.68)
+  };
+  const racketThroatNorm = {
+    x: activeWrist.x + rDirX * (racketNormLen * 0.36),
+    y: activeWrist.y + rDirY * (racketNormLen * 0.36)
+  };
+
+  engine.liveRacket2D = {
+    wrist: { x: activeWrist.x, y: activeWrist.y },
+    throat: racketThroatNorm,
+    hoop: racketHoopNorm,
+    tip: racketTipNorm,
+    angleRad: Math.atan2(rDirY, rDirX),
+    faceTiltDeg: Math.round(((pinkyPt.y - handPt.y) / Math.max(0.01, rawSpan)) * 180)
+  };
+
   engine.wristTrail2D.push({ x: activeWrist.x, y: activeWrist.y, t: lock.matchedPhaseT });
-  if (engine.wristTrail2D.length > 26) engine.wristTrail2D.shift();
+  if (engine.wristTrail2D.length > 28) engine.wristTrail2D.shift();
+
+  engine.racketTipTrail2D.push({
+    tipX: racketTipNorm.x,
+    tipY: racketTipNorm.y,
+    wrX: activeWrist.x,
+    wrY: activeWrist.y,
+    hoopX: racketHoopNorm.x,
+    hoopY: racketHoopNorm.y,
+    t: lock.matchedPhaseT
+  });
+  if (engine.racketTipTrail2D.length > 28) engine.racketTipTrail2D.shift();
 
   let swingPathAngleDeg = 15;
-  if (engine.wristTrail2D.length >= 4) {
-    const pStart = engine.wristTrail2D[0];
-    const pEnd = engine.wristTrail2D[engine.wristTrail2D.length - 1];
-    const dx = Math.abs(pEnd.x - pStart.x);
-    const dy = pStart.y - pEnd.y; // positive when moving low-to-high (upward on screen)
+  if (engine.racketTipTrail2D.length >= 4) {
+    const pStart = engine.racketTipTrail2D[0];
+    const pEnd = engine.racketTipTrail2D[engine.racketTipTrail2D.length - 1];
+    const dx = Math.abs(pEnd.tipX - pStart.tipX);
+    const dy = pStart.tipY - pEnd.tipY; // positive when moving low-to-high (upward on screen)
     if (dx > 0.02) {
       swingPathAngleDeg = Math.round(Math.max(6, Math.min(34, Math.atan2(Math.max(0.01, dy), dx) * (180 / Math.PI))));
     }
