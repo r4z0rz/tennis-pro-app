@@ -333,11 +333,12 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
  * Draws the 3D Skeleton Rig + Live Swing Trajectory Trail + Elbow Spacing Caliper + Impact Zone Crosshair
  * directly on the uploaded video in the Left Viewport so the father sees his exact video movement tracked!
  */
-function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
-  if (!rect || !window.AIPoseEngine || !window.AIPoseEngine.liveUserLandmarks2D) return;
-  const lm = window.AIPoseEngine.liveUserLandmarks2D;
+function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95, slot = 'user') {
+  if (!rect || !window.AIPoseEngine) return;
+  const lm = slot === 'pro' ? window.AIPoseEngine.liveProLandmarks2D : window.AIPoseEngine.liveUserLandmarks2D;
+  if (!lm) return;
   const lock = window.AIPoseEngine.videoLock;
-  const vm = window.AIPoseEngine.videoMetrics;
+  const vm = slot === 'pro' ? window.AIPoseEngine.proVideoMetrics : window.AIPoseEngine.videoMetrics;
 
   const pt = (idx) => ({
     x: rect.dx + lm[idx].x * rect.dw,
@@ -384,7 +385,7 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
   const pToeL = pt(31), pToeR = pt(32);
 
   // 1. Live 2D Racket Tip & Wrist Swing Path Ribbon on Video (AceCue Racket Tracking Overlay)
-  const rTrail = window.AIPoseEngine.racketTipTrail2D || [];
+  const rTrail = (slot === 'pro' ? window.AIPoseEngine.proRacketTipTrail2D : window.AIPoseEngine.racketTipTrail2D) || [];
   if (rTrail.length > 1) {
     ctx.save();
     // Translucent swept racket ribbon between wrist and racket tip
@@ -528,7 +529,7 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95) {
   ctx.restore();
 
   // 7. Full Tracked Tennis Racket (Handle, Throat, String Hoop, Sweet-Spot Reticle & Face Normal Vector) on Video!
-  const rk = window.AIPoseEngine.liveRacket2D;
+  const rk = slot === 'pro' ? window.AIPoseEngine.liveProRacket2D : window.AIPoseEngine.liveRacket2D;
   const rWr = rk
     ? { x: rect.dx + rk.wrist.x * rect.dw, y: rect.dy + rk.wrist.y * rect.dh }
     : pWrR;
@@ -1515,7 +1516,9 @@ function render3DOverlayStage() {
     ? lock.matchedPhaseT
     : t;
 
-  const proPose = interpolate3DPose(stroke.proKeyframes, effectivePhaseT);
+  const proPose = (AppState.overlay.proVideoLoaded && window.AIPoseEngine && window.AIPoseEngine.liveProPose3D)
+    ? window.AIPoseEngine.liveProPose3D
+    : interpolate3DPose(stroke.proKeyframes, effectivePhaseT);
   proPose._phaseT = effectivePhaseT;
 
   const userPose = (AppState.overlay.userVideoLoaded && window.AIPoseEngine && window.AIPoseEngine.liveUserPose3D)
@@ -1570,10 +1573,38 @@ function render3DOverlayStage() {
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, splitX, h); ctx.clip();
 
-    if (AppState.overlay.userVideoLoaded) {
+    if (AppState.overlay.userVideoLoaded && AppState.overlay.proVideoLoaded) {
+      // BOTH VIDEOS UPLOADED: Split Left Viewport into Top (Pro Reference Video + AI Skeleton/Racket) & Bottom (Father's Video + AI Skeleton/Racket)
+      const halfH = Math.round(h * 0.5);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, splitX, halfH); ctx.clip();
+      const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, splitX, halfH, lock);
+      if (Viewer3D.layers.show3DOverVideo && proRect && window.AIPoseEngine && window.AIPoseEngine.liveProLandmarks2D) {
+        drawDirectVideo3DAthlete(ctx, proRect, proTheme, 0.96, 'pro');
+      }
+      ctx.fillStyle = "#fde047";
+      ctx.font = "bold 10px sans-serif";
+      ctx.fillText("⭐ ВИДЕО ПРОФИ (ЭТАЛОН + ТРЕКИНГ РАКЕТКИ)", 12, halfH - 8);
+      ctx.restore();
+
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, halfH, splitX, h - halfH); ctx.clip();
+      const vidRect = drawCleanVideoCover(ctx, userVid, 0, halfH, splitX, h - halfH, lock);
+      if (Viewer3D.layers.show3DOverVideo && vidRect && window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+        drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.96, 'user');
+      }
+      ctx.fillStyle = "#38bdf8";
+      ctx.font = "bold 10px sans-serif";
+      ctx.fillText("📹 ВАШЕ ВИДЕО (AI 3D РИГ + ТРЕКИНГ РАКЕТКИ)", 12, h - 8);
+      ctx.restore();
+
+      ctx.strokeStyle = "rgba(251, 191, 36, 0.5)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, halfH); ctx.lineTo(splitX, halfH); ctx.stroke();
+    } else if (AppState.overlay.userVideoLoaded) {
       const vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, splitX, h, lock);
       if (Viewer3D.layers.show3DOverVideo && vidRect && window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
-        drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.96);
+        drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.96, 'user');
       }
       // Picture-in-Picture Pro Reference Mini-Card in Top-Right of Left Viewport for direct side-by-side reference
       const pipW = 136, pipH = 152, pipX = splitX - pipW - 10, pipY = 44;
@@ -1588,7 +1619,12 @@ function render3DOverlayStage() {
       draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, pipX + pipW * 0.5, pipY + pipH * 0.60, 108, proTheme, 0.95, proCam);
       ctx.fillStyle = "#fde047";
       ctx.font = "bold 10px sans-serif";
-      ctx.fillText(`⭐ Эталон: ${stroke.proName.split('(')[0].trim()}`, pipX + 8, pipY + 14);
+      ctx.fillText(`⭐ 3D-База: ${stroke.proName.split('(')[0].trim()}`, pipX + 8, pipY + 14);
+    } else if (AppState.overlay.proVideoLoaded) {
+      const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, splitX, h, lock);
+      if (Viewer3D.layers.show3DOverVideo && proRect && window.AIPoseEngine && window.AIPoseEngine.liveProLandmarks2D) {
+        drawDirectVideo3DAthlete(ctx, proRect, proTheme, 0.96, 'pro');
+      }
     } else {
       // Side-by-Side Pro (Left) vs User (Right) inside Left Viewport + Optional Camera Framing Guide
       draw3DFloorGrid(ctx, splitX * 0.50, centerY, baseScale * 0.78, proCam);

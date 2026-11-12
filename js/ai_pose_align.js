@@ -41,13 +41,35 @@ window.AIPoseEngine = {
 
   // Smoothed 2D normalized landmarks (0..1 in video frame) for 1:1 direct overlay on the video player
   liveUserLandmarks2D: null,
+  liveProLandmarks2D: null,
   liveUserPose3D: null,
   liveProPose3D: null,
   wristTrail2D: [],
   racketTipTrail2D: [],
+  proRacketTipTrail2D: [],
   liveRacket2D: null,
+  liveProRacket2D: null,
   showCameraGuide: false,
   lockImpactMode: false,
+
+  proVideoMetrics: {
+    hasAnalyzedVideo: false,
+    framesAnalyzed: 0,
+    fileName: '',
+    kneeAngleDeg: 118,
+    minKneeAngleDeg: 118,
+    elbowAngleDeg: 142,
+    elbowSpacingCm: 27,
+    contactOffsetCm: 38,
+    swingPathAngleDeg: 29,
+    hipShoulderSepDeg: 48,
+    stanceWidthCm: 72,
+    weightFrontPct: 84,
+    ballSpeedKmh: 128,
+    spinRpm: 2950,
+    netClearanceCm: 74,
+    landingDepthM: 10.7
+  },
 
   // Exact video-locked alignment transform for the Pro 3D Ghost
   videoLock: {
@@ -206,11 +228,12 @@ function processVideoFrameWithAI(videoEl, slot, timestampMs) {
   if (!timeChanged && engine.videoLock.active && (timestampMs - engine.lastInferenceTimeMs < 120)) {
     return slot === 'user' ? engine.liveUserPose3D : engine.liveProPose3D;
   }
-  if (timestampMs - engine.lastInferenceTimeMs < 35) {
+  if ( timestampMs - engine.lastInferenceTimeMs < 35 && slot === engine._lastSlot ) {
     return slot === 'user' ? engine.liveUserPose3D : engine.liveProPose3D;
   }
 
   engine.lastInferenceTimeMs = timestampMs;
+  engine._lastSlot = slot;
   if (slot === 'user') engine.lastVideoTimeUser = curVideoTime;
   else engine.lastVideoTimePro = curVideoTime;
 
@@ -227,9 +250,15 @@ function processVideoFrameWithAI(videoEl, slot, timestampMs) {
 
         if (slot === 'user') {
           engine.liveUserLandmarks2D = smoothLandmarks2D(engine.liveUserLandmarks2D, rawLm2d, 0.42);
-          const lockData = computeVideoLockAndMetrics(engine.liveUserLandmarks2D, lm3d);
+          const lockData = computeVideoLockAndMetrics(engine.liveUserLandmarks2D, lm3d, 'user');
           engine.liveUserPose3D = lockData.pose3D;
           accumulateVideoMetrics(lockData.pose3D, lockData.metrics, timestampMs);
+          detectedWithMediaPipe = true;
+        } else if (slot === 'pro') {
+          engine.liveProLandmarks2D = smoothLandmarks2D(engine.liveProLandmarks2D, rawLm2d, 0.42);
+          const proData = computeVideoLockAndMetrics(engine.liveProLandmarks2D, lm3d, 'pro');
+          engine.liveProPose3D = proData.pose3D;
+          accumulateProVideoMetrics(proData.pose3D, proData.metrics, timestampMs);
           detectedWithMediaPipe = true;
         }
       }
@@ -238,11 +267,16 @@ function processVideoFrameWithAI(videoEl, slot, timestampMs) {
     }
   }
 
-  if (slot === 'user' && !detectedWithMediaPipe) {
-    const opticalResult = analyzeVideoPixelsOpticalFlow(videoEl, curVideoTime);
+  if (!detectedWithMediaPipe) {
+    const opticalResult = analyzeVideoPixelsOpticalFlow(videoEl, curVideoTime, slot);
     if (opticalResult) {
-      engine.liveUserPose3D = opticalResult.pose3D;
-      accumulateVideoMetrics(opticalResult.pose3D, opticalResult.metrics, timestampMs);
+      if (slot === 'user') {
+        engine.liveUserPose3D = opticalResult.pose3D;
+        accumulateVideoMetrics(opticalResult.pose3D, opticalResult.metrics, timestampMs);
+      } else {
+        engine.liveProPose3D = opticalResult.pose3D;
+        accumulateProVideoMetrics(opticalResult.pose3D, opticalResult.metrics, timestampMs);
+      }
     }
   }
 
@@ -256,7 +290,7 @@ function processVideoFrameWithAI(videoEl, slot, timestampMs) {
  * 3. Exact instantaneous Swing Phase [0..1] (T0 Prep -> T1 Drop -> T2 Contact -> T3 Follow-through)
  *    so the Pro Ghost's swing is synchronized with what the player in the video is actually doing!
  */
-function computeVideoLockAndMetrics(lm2d, lm3d) {
+function computeVideoLockAndMetrics(lm2d, lm3d, slot = 'user') {
   const engine = window.AIPoseEngine;
   const lock = engine.videoLock;
 
@@ -378,7 +412,7 @@ function computeVideoLockAndMetrics(lm2d, lm3d) {
     y: activeWrist.y + rDirY * (racketNormLen * 0.36)
   };
 
-  engine.liveRacket2D = {
+  const racketObj = {
     wrist: { x: activeWrist.x, y: activeWrist.y },
     throat: racketThroatNorm,
     hoop: racketHoopNorm,
@@ -387,10 +421,7 @@ function computeVideoLockAndMetrics(lm2d, lm3d) {
     faceTiltDeg: Math.round(((pinkyPt.y - handPt.y) / Math.max(0.01, rawSpan)) * 180)
   };
 
-  engine.wristTrail2D.push({ x: activeWrist.x, y: activeWrist.y, t: lock.matchedPhaseT });
-  if (engine.wristTrail2D.length > 28) engine.wristTrail2D.shift();
-
-  engine.racketTipTrail2D.push({
+  const trailEntry = {
     tipX: racketTipNorm.x,
     tipY: racketTipNorm.y,
     wrX: activeWrist.x,
@@ -398,41 +429,86 @@ function computeVideoLockAndMetrics(lm2d, lm3d) {
     hoopX: racketHoopNorm.x,
     hoopY: racketHoopNorm.y,
     t: lock.matchedPhaseT
-  });
-  if (engine.racketTipTrail2D.length > 28) engine.racketTipTrail2D.shift();
+  };
 
-  let swingPathAngleDeg = 15;
-  if (engine.racketTipTrail2D.length >= 4) {
-    const pStart = engine.racketTipTrail2D[0];
-    const pEnd = engine.racketTipTrail2D[engine.racketTipTrail2D.length - 1];
+  if (slot === 'pro') {
+    engine.liveProRacket2D = racketObj;
+    engine.proRacketTipTrail2D.push(trailEntry);
+    if (engine.proRacketTipTrail2D.length > 28) engine.proRacketTipTrail2D.shift();
+  } else {
+    engine.liveRacket2D = racketObj;
+    engine.wristTrail2D.push({ x: activeWrist.x, y: activeWrist.y, t: lock.matchedPhaseT });
+    if (engine.wristTrail2D.length > 28) engine.wristTrail2D.shift();
+    engine.racketTipTrail2D.push(trailEntry);
+    if (engine.racketTipTrail2D.length > 28) engine.racketTipTrail2D.shift();
+  }
+
+  const activeTrail = slot === 'pro' ? engine.proRacketTipTrail2D : engine.racketTipTrail2D;
+  let swingPathAngleDeg = slot === 'pro' ? 29 : 15;
+  if (activeTrail.length >= 4) {
+    const pStart = activeTrail[0];
+    const pEnd = activeTrail[activeTrail.length - 1];
     const dx = Math.abs(pEnd.tipX - pStart.tipX);
-    const dy = pStart.tipY - pEnd.tipY; // positive when moving low-to-high (upward on screen)
+    const dy = pStart.tipY - pEnd.tipY;
     if (dx > 0.02) {
-      swingPathAngleDeg = Math.round(Math.max(6, Math.min(34, Math.atan2(Math.max(0.01, dy), dx) * (180 / Math.PI))));
+      swingPathAngleDeg = Math.round(Math.max(6, Math.min(38, Math.atan2(Math.max(0.01, dy), dx) * (180 / Math.PI))));
     }
   }
 
   const stanceWidthCm = Math.round((Math.hypot(lm2d[27].x - lm2d[28].x, lm2d[27].y - lm2d[28].y) / rawSpan) * 130);
-  const contactOffsetCm = Math.max(-5, Math.min(32, Math.round(forwardReach * 48)));
-  const contactLateCm = Math.max(8, Math.round(38 - contactOffsetCm));
-  const weightFrontPct = Math.round(Math.max(35, Math.min(90, 52 + forwardReach * 45)));
+  const contactOffsetCm = Math.max(-5, Math.min(44, Math.round(forwardReach * 52)));
+  const proRefContactCm = (AppState.overlay.proVideoLoaded && engine.proVideoMetrics.hasAnalyzedVideo)
+    ? engine.proVideoMetrics.contactOffsetCm
+    : 38;
+  const contactLateCm = Math.max(4, Math.round(proRefContactCm - contactOffsetCm));
+  const weightFrontPct = Math.round(Math.max(35, Math.min(92, 52 + forwardReach * 45)));
 
   const stroke = window.ACECUE_STROKES[AppState.overlay.preset] || window.ACECUE_STROKES.forehand;
   const effectiveT = engine.lockImpactMode ? 0.62 : lock.matchedPhaseT;
-  const basePose = interpolate3DPose(stroke.userKeyframes, effectiveT);
+  const baseKeyframes = slot === 'pro' ? stroke.proKeyframes : stroke.userKeyframes;
+  const basePose = interpolate3DPose(baseKeyframes, effectiveT);
+
+  // Dynamically deform the 3D rig's hitting arm, elbow spacing, wrist, racket tip & ball to match the ACTUAL video measurements!
+  const fSign3D = 1;
+  const measuredElX = 0.20 + (elbowSpacingCm / 100); // e.g., 13cm -> 0.33, 27cm -> 0.47
+  const measuredContactZ = (contactOffsetCm / 100);  // e.g., +17cm -> 0.17, +38cm -> 0.38
+  const wristY = Math.max(0.68, Math.min(1.55, 0.92 + wristHeightRel * 0.42));
+  const brushRad = (swingPathAngleDeg * Math.PI) / 180;
+
+  const dynamicPose3D = {
+    ...basePose,
+    elR: [
+      basePose.shR[0] + (measuredElX - basePose.shR[0]) * 0.85,
+      Math.max(0.75, wristY - 0.14),
+      measuredContactZ * 0.55
+    ],
+    wrR: [
+      measuredElX + 0.14 * fSign3D,
+      wristY,
+      measuredContactZ
+    ],
+    rTip: [
+      measuredElX + 0.36 * fSign3D,
+      wristY + Math.sin(brushRad) * 0.24,
+      measuredContactZ + 0.18
+    ],
+    ball: [
+      measuredElX + 0.28 * fSign3D,
+      wristY + 0.04,
+      measuredContactZ + 0.14
+    ],
+    kneeBendDeg,
+    elbowAngleDeg,
+    elbowSpacingCm,
+    contactOffsetCm,
+    contactLateCm,
+    swingPathAngleDeg,
+    weightL: weightFrontPct,
+    weightR: 100 - weightFrontPct
+  };
 
   return {
-    pose3D: {
-      ...basePose,
-      kneeBendDeg,
-      elbowAngleDeg,
-      elbowSpacingCm,
-      contactOffsetCm,
-      contactLateCm,
-      swingPathAngleDeg,
-      weightL: weightFrontPct,
-      weightR: 100 - weightFrontPct
-    },
+    pose3D: dynamicPose3D,
     metrics: {
       kneeBendDeg,
       elbowAngleDeg,
@@ -521,8 +597,24 @@ function analyzeVideoPixelsOpticalFlow(videoEl, curTime) {
   return null;
 }
 
+function accumulateProVideoMetrics(pose3D, frameMetrics, timestampMs) {
+  const pm = window.AIPoseEngine.proVideoMetrics;
+  pm.hasAnalyzedVideo = true;
+  pm.framesAnalyzed += 1;
+  pm.kneeAngleDeg = Math.round(smoothScalar(pm.kneeAngleDeg, frameMetrics.kneeBendDeg, 0.25));
+  pm.elbowAngleDeg = Math.round(smoothScalar(pm.elbowAngleDeg, frameMetrics.elbowAngleDeg, 0.25));
+  pm.elbowSpacingCm = Math.round(smoothScalar(pm.elbowSpacingCm, Math.max(20, frameMetrics.elbowSpacingCm || 27), 0.25));
+  pm.contactOffsetCm = Math.round(smoothScalar(pm.contactOffsetCm, Math.max(26, frameMetrics.contactOffsetCm || 38), 0.25));
+  pm.swingPathAngleDeg = Math.round(smoothScalar(pm.swingPathAngleDeg, Math.max(22, frameMetrics.swingPathAngleDeg || 29), 0.25));
+  pm.weightFrontPct = Math.round(smoothScalar(pm.weightFrontPct, frameMetrics.weightFrontPct, 0.25));
+}
+
 function accumulateVideoMetrics(pose3D, frameMetrics, timestampMs) {
   const vm = window.AIPoseEngine.videoMetrics;
+  const pm = window.AIPoseEngine.proVideoMetrics;
+  const proContactCm = (AppState.overlay.proVideoLoaded && pm.hasAnalyzedVideo) ? pm.contactOffsetCm : 38;
+  const proElbowCm = (AppState.overlay.proVideoLoaded && pm.hasAnalyzedVideo) ? pm.elbowSpacingCm : 27;
+
   vm.hasAnalyzedVideo = true;
   vm.framesAnalyzed += 1;
 
@@ -537,19 +629,19 @@ function accumulateVideoMetrics(pose3D, frameMetrics, timestampMs) {
     vm.maxHipShoulderSepDeg = frameMetrics.hipShoulderSepDeg;
   }
   vm.contactOffsetCm = Math.round(smoothScalar(vm.contactOffsetCm, frameMetrics.contactOffsetCm, 0.22));
-  vm.contactLateCm = Math.max(8, Math.round(38 - vm.contactOffsetCm));
+  vm.contactLateCm = Math.max(4, Math.round(proContactCm - vm.contactOffsetCm));
   vm.swingPathAngleDeg = Math.round(smoothScalar(vm.swingPathAngleDeg, frameMetrics.swingPathAngleDeg || 15, 0.22));
   vm.stanceWidthCm = Math.round(smoothScalar(vm.stanceWidthCm, frameMetrics.stanceWidthCm, 0.22));
   vm.weightFrontPct = Math.round(smoothScalar(vm.weightFrontPct, frameMetrics.weightFrontPct, 0.22));
 
   // Cause-and-Effect Ball Flight & Court Landing Physics (Voice Message #2)
   const kneeDriveFactor = Math.max(0, 170 - vm.minKneeAngleDeg); // deg of knee bend
-  vm.ballSpeedKmh = Math.round(86 + vm.elbowSpacingCm * 0.85 + Math.max(0, 38 - vm.contactLateCm) * 0.48);
+  vm.ballSpeedKmh = Math.round(86 + vm.elbowSpacingCm * 0.85 + Math.max(0, proContactCm - vm.contactLateCm) * 0.48);
   vm.spinRpm = Math.round(850 + vm.swingPathAngleDeg * 48 + kneeDriveFactor * 10);
   vm.netClearanceCm = Math.round(16 + vm.swingPathAngleDeg * 1.65);
   vm.landingDepthM = Number((6.6 + (vm.ballSpeedKmh - 90) * 0.085 + (vm.netClearanceCm - 25) * 0.022).toFixed(1));
   vm.shortfallM = Number(Math.max(0.2, 10.7 - vm.landingDepthM).toFixed(1));
-  vm.targetHitPct = Math.round(Math.max(25, Math.min(92, 90 - vm.contactLateCm * 1.4 - Math.max(0, 26 - vm.elbowSpacingCm) * 1.1)));
+  vm.targetHitPct = Math.round(Math.max(25, Math.min(92, 90 - vm.contactLateCm * 1.4 - Math.max(0, proElbowCm - vm.elbowSpacingCm) * 1.1)));
 
   const prepScore = Math.min(9.6, Math.max(5.2, 6.0 + (vm.maxHipShoulderSepDeg / 45) * 3.4));
   const footScore = Math.min(9.5, Math.max(5.0, 5.5 + (vm.stanceWidthCm / 68) * 3.6));
