@@ -345,12 +345,14 @@ function syncHtmlVideosToProgress() {
   const uv = document.getElementById('user-video-element');
   const pv = document.getElementById('pro-video-element');
   if (AppState.overlay.userVideoLoaded && uv && uv.duration) {
-    const targetT = Math.max(0, Math.min(uv.duration, AppState.overlay.progress * uv.duration + Viewer3D.videoSyncOffsetSec));
-    if (Math.abs(uv.currentTime - targetT) > 0.04) uv.currentTime = targetT;
+    const clipLen = Math.min(uv.duration, 3.0);
+    const targetT = Math.max(0, Math.min(uv.duration, AppState.overlay.progress * clipLen + Viewer3D.videoSyncOffsetSec));
+    if (Math.abs(uv.currentTime - targetT) > 0.05) uv.currentTime = targetT;
   }
   if (AppState.overlay.proVideoLoaded && pv && pv.duration) {
-    const targetT = Math.max(0, Math.min(pv.duration, AppState.overlay.progress * pv.duration));
-    if (Math.abs(pv.currentTime - targetT) > 0.04) pv.currentTime = targetT;
+    const clipLen = Math.min(pv.duration, 3.0);
+    const targetT = Math.max(0, Math.min(pv.duration, AppState.overlay.progress * clipLen));
+    if (Math.abs(pv.currentTime - targetT) > 0.05) pv.currentTime = targetT;
   }
 }
 
@@ -812,11 +814,14 @@ function appRenderLoop(now) {
   if (AppState.currentTab === 'overlay') {
     if (AppState.overlay.isPlaying) {
       const uv = document.getElementById('user-video-element');
+      const strokeDuration = 2.4;
       if (AppState.overlay.userVideoLoaded && uv && uv.duration && !uv.paused) {
-        AppState.overlay.progress = (uv.currentTime % uv.duration) / uv.duration;
+        // Map video time smoothly to 2.4s biomechanical swing cycle so long videos never freeze the 3D ghost
+        const cycleLen = Math.min(uv.duration, strokeDuration);
+        const rawT = Math.max(0, uv.currentTime - (Viewer3D.videoSyncOffsetSec || 0));
+        AppState.overlay.progress = (rawT % cycleLen) / cycleLen;
       } else {
-        const duration = 2.4;
-        AppState.overlay.progress += (dt * AppState.overlay.speed) / duration;
+        AppState.overlay.progress += (dt * AppState.overlay.speed) / strokeDuration;
         if (AppState.overlay.progress >= 1.0) AppState.overlay.progress = 0.0;
       }
       const scrub = document.getElementById('video-scrubber');
