@@ -380,7 +380,13 @@ function handleProVideoUpload(e) {
 
 function onPresetChange(val) {
   AppState.overlay.preset = val;
-  renderAceCueSidebar();
+  if (window.AIPoseEngine && window.AIPoseEngine.scans && window.AIPoseEngine.scans.user.status === 'ready') {
+    if (typeof recomputeSlotMetricsFromScan === 'function') recomputeSlotMetricsFromScan('user');
+    if (typeof updateSidebarWithLiveVideoMetrics === 'function') updateSidebarWithLiveVideoMetrics();
+  } else {
+    renderAceCueSidebar();
+  }
+  if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
 }
 
 function syncHtmlVideosToProgress() {

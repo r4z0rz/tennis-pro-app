@@ -377,7 +377,7 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
   ctx.fillRect(x, y, w, h);
 
   ctx.restore();
-  return { dx, dy, dw, dh, smartZoom };
+  return { dx, dy, dw, dh, smartZoom, viewX: x, viewY: y, viewW: w, viewH: h };
 }
 
 /**
@@ -661,18 +661,24 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95, slot = 'user')
   ctx.stroke();
 
   ctx.fillStyle = "rgba(7, 11, 18, 0.85)";
-  ctx.strokeStyle = "#a3e635";
+  ctx.strokeStyle = isProSlot ? "#fbbf24" : "#a3e635";
   ctx.lineWidth = 1.2;
-  const tagX = Math.max(8, Math.min(rect.dx + rect.dw - 135, rTip.x + 8));
-  const tagY = Math.max(38, rTip.y - 22);
+  const vxMin = rect.viewX !== undefined ? rect.viewX + 6 : 8;
+  const vxMax = rect.viewX !== undefined ? rect.viewX + rect.viewW - 122 : rect.dx + rect.dw - 135;
+  const vyMin = rect.viewY !== undefined ? rect.viewY + 42 : 42;
+  const vyMax = rect.viewY !== undefined ? rect.viewY + rect.viewH - 34 : 520;
+  const tagX = Math.max(vxMin, Math.min(Math.max(vxMin, vxMax), rTip.x + 8));
+  const tagY = Math.max(vyMin, Math.min(Math.max(vyMin, vyMax), rTip.y - 22));
+  const rkTagW = 114;
   ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(tagX, tagY, 128, 20, 5);
-  else ctx.rect(tagX, tagY, 128, 20);
+  if (ctx.roundRect) ctx.roundRect(tagX, tagY, rkTagW, 20, 5);
+  else ctx.rect(tagX, tagY, rkTagW, 20);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "#bef264";
+  ctx.fillStyle = isProSlot ? "#fde047" : "#bef264";
   ctx.font = "bold 10px monospace";
-  ctx.fillText(`🎾 РАКЕТКА: +${vm.swingPathAngleDeg}°`, tagX + 6, tagY + 14);
+  const rkAngleShow = rk ? rk.angleDeg : vm.swingPathAngleDeg;
+  ctx.fillText(`🎾 РАКЕТКА: ${rkAngleShow >= 0 ? '+' : ''}${rkAngleShow}°`, tagX + 6, tagY + 14);
   ctx.restore();
 
   ctx.restore();
@@ -1389,8 +1395,19 @@ function drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, cx, cy, scale, 
 
   const marginX = viewX + 12;
   const rightCardX = viewX + viewW - 238;
+  const eng = window.AIPoseEngine;
+  const pm = eng && eng.proVideoMetrics;
+  const hasRealPro = Boolean(eng && eng.scans && eng.scans.pro && eng.scans.pro.status === 'ready' && pm && pm.hasAnalyzedVideo);
+  const proCon = hasRealPro ? pm.contactOffsetCm : 38;
+  const proElb = hasRealPro ? pm.elbowSpacingCm : 27;
+  const proPath = hasRealPro ? pm.swingPathAngleDeg : 29;
+  const lateVal = vm.contactLateCm !== undefined ? vm.contactLateCm : (proCon - (vm.contactOffsetCm || 17));
+  const lateAbs = Math.abs(lateVal);
+  const lateTitle = lateVal >= 0
+    ? `🔴 ТОЧКА УДАРА: на ${lateAbs} см ПОЗЖЕ`
+    : `🟢 ТОЧКА УДАРА: на ${lateAbs} см РАНЬШЕ`;
 
-  // Callout #1: Contact Point 21 cm Late
+  // Callout #1: Contact Point Divergence
   const midBallX = (pProBall.x + pUserBall.x) * 0.5;
   const midBallY = (pProBall.y + pUserBall.y) * 0.5;
   drawCalloutCard(
@@ -1398,14 +1415,14 @@ function drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, cx, cy, scale, 
     midBallY,
     marginX,
     46,
-    248,
+    252,
     36,
-    "#f43f5e",
-    `🔴 ТОЧКА УДАРА: на ${vm.contactLateCm} см ПОЗЖЕ`,
-    `Вы: +${vm.contactOffsetCm} см перед тазом | Профи: +38 см`
+    lateVal > 4 ? "#f43f5e" : "#10b981",
+    lateTitle,
+    `Вы: +${vm.contactOffsetCm} см перед тазом | Профи: +${proCon} см`
   );
 
-  // Callout #2: Elbow Too Close to Body (13 cm vs 27 cm)
+  // Callout #2: Elbow-to-Body Spacing
   const midElX = (pUserEl.x + pUserRib.x) * 0.5;
   const midElY = (pUserEl.y + pUserRib.y) * 0.5;
   drawCalloutCard(
@@ -1413,14 +1430,14 @@ function drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, cx, cy, scale, 
     midElY,
     marginX,
     88,
-    248,
+    252,
     36,
     "#f97316",
-    `🟠 ЛОКОТЬ СЛИШКОМ БЛИЗКО: ${vm.elbowSpacingCm} см`,
-    `Зажат у рёбер (${vm.elbowSpacingCm} см vs 27 см у Профи)`
+    `🟠 ЛОКОТЬ ОТ КОРПУСА: ${vm.elbowSpacingCm} см`,
+    `${vm.elbowSpacingCm < proElb - 3 ? 'Зажат у рёбер' : 'Свободный рычаг'} (${vm.elbowSpacingCm} см vs ${proElb} см)`
   );
 
-  // Callout #3: Swing Path Trajectory Angle (+15° vs +29°)
+  // Callout #3: Swing Path Trajectory Angle
   drawCalloutCard(
     pProBall.x,
     pProBall.y - 12,
@@ -1429,8 +1446,8 @@ function drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, cx, cy, scale, 
     226,
     36,
     "#eab308",
-    `🟡 ТРАЕКТОРИЯ: +${vm.swingPathAngleDeg}° vs +29°`,
-    `Мало разгона снизу-вверх (${vm.spinRpm || 1480} RPM)`
+    `🟡 ТРАЕКТОРИЯ: +${vm.swingPathAngleDeg}° vs +${proPath}°`,
+    `Снизу-вверх (${vm.spinRpm || 1480} RPM · укладка)`
   );
 
   ctx.restore();

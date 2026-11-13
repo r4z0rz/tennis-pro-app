@@ -12,6 +12,9 @@
 Приложение доступно онлайн на GitHub Pages:
 👉 **[https://r4z0rz.github.io/tennis-pro-app/](https://r4z0rz.github.io/tennis-pro-app/)**
 
+## 🤖 Multi-Agent Sync
+Architecture overview, math contracts, state schemas, and synchronization ledger for collaborating AI agents: **[AGENT_SYNC.md](AGENT_SYNC.md)**.
+
 ## 💻 Локальный запуск
 Приложение полностью автономно и не требует серверов или установки зависимостей:
 1. Клонируйте репозиторий:
