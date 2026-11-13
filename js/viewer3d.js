@@ -196,18 +196,20 @@ function loadVideoFileIntoSlot(file, slot) {
   videoEl.load();
 
   videoEl.onloadedmetadata = () => {
+    const engine = window.AIPoseEngine;
     if (slot === 'pro') {
       AppState.overlay.proVideoLoaded = true;
       const bPro = document.getElementById('badge-pro');
       if (bPro) bPro.innerHTML = `⭐ ВИДЕО ПРОФИ: ${file.name.slice(0, 18)}`;
-      if (window.AIPoseEngine) {
-        window.AIPoseEngine.liveProPose3D = null;
-        window.AIPoseEngine.liveProLandmarks2D = null;
-        window.AIPoseEngine.proRacketTipTrail2D = [];
-        window.AIPoseEngine.liveProRacket2D = null;
-        window.AIPoseEngine.proVideoLock.active = false;
-        window.AIPoseEngine.proVideoMetrics.framesAnalyzed = 0;
-        window.AIPoseEngine.proVideoMetrics.fileName = file.name;
+      if (engine) {
+        engine.liveProPose3D = null;
+        engine.liveProLandmarks2D = null;
+        engine.proRacketTipTrail2D = [];
+        engine.liveProRacket2D = null;
+        engine.proVideoLock.active = false;
+        engine.proVideoLock.cropBox = null;
+        engine.proVideoMetrics.framesAnalyzed = 0;
+        engine.proVideoMetrics.fileName = file.name;
       }
     } else {
       AppState.overlay.userVideoLoaded = true;
@@ -215,48 +217,54 @@ function loadVideoFileIntoSlot(file, slot) {
       if (bUsr) bUsr.innerHTML = `📹 ВАШЕ ВИДЕО (AI 3D РИГ): ${file.name.slice(0, 18)}`;
       Viewer3D.cam.zoom = 1.0;
       Viewer3D.cam.panX = 0;
-      Viewer3D.cam.panY = 32;
+      Viewer3D.cam.panY = 0;
       if (typeof setOverlayMode === 'function') {
         setOverlayMode('split');
       }
-      if (window.AIPoseEngine) {
-        window.AIPoseEngine.smoothedVideoAnchor.initialized = false;
-        window.AIPoseEngine.liveUserPose3D = null;
-        window.AIPoseEngine.liveUserLandmarks2D = null;
-        window.AIPoseEngine.wristTrail2D = [];
-        window.AIPoseEngine.racketTipTrail2D = [];
-        window.AIPoseEngine.liveRacket2D = null;
-        window.AIPoseEngine.videoLock.active = false;
-        window.AIPoseEngine.videoMetrics.framesAnalyzed = 0;
-        window.AIPoseEngine.videoMetrics.minKneeAngleDeg = 165;
-        window.AIPoseEngine.videoMetrics.fileName = file.name;
+      if (engine) {
+        engine.smoothedVideoAnchor.initialized = false;
+        engine.liveUserPose3D = null;
+        engine.liveUserLandmarks2D = null;
+        engine.wristTrail2D = [];
+        engine.racketTipTrail2D = [];
+        engine.liveRacket2D = null;
+        engine.videoLock.active = false;
+        engine.videoLock.cropBox = null;
+        engine.videoMetrics.framesAnalyzed = 0;
+        engine.videoMetrics.minKneeAngleDeg = 165;
+        engine.videoMetrics.fileName = file.name;
       }
     }
 
-    const calBar = document.getElementById('video-calibration-bar');
-    if (calBar) calBar.classList.remove('hidden');
     const clrBtn = document.getElementById('btn-clear-video');
     if (clrBtn) clrBtn.classList.remove('hidden');
 
-    // Start in 0.25x slow-motion synced around T2 Impact so the father immediately sees both the swing and the contact divergence
     AppState.overlay.speed = 0.25;
     AppState.overlay.progress = 0.62;
     const scrub = document.getElementById('video-scrubber');
     if (scrub) scrub.value = 620;
-
     videoEl.playbackRate = AppState.overlay.speed;
-    AppState.overlay.isPlaying = true;
-    const playIcon = document.getElementById('video-play-icon');
-    const playText = document.getElementById('video-play-text');
-    if (playIcon) playIcon.textContent = '⏸';
-    if (playText) playText.textContent = 'Пауза';
-    videoEl.play().catch(() => {});
 
-    if (typeof updateSidebarWithLiveVideoMetrics === 'function') {
-      updateSidebarWithLiveVideoMetrics();
-    }
-    if (typeof renderCauseAndEffectStrip === 'function') {
-      renderCauseAndEffectStrip();
+    // Launch automated Pre-Scan pipeline (MediaPipe 3D + Pixel-Vision PCA Racket + Static Crop + T2 Sync)
+    if (engine && typeof prescanVideoClip === 'function') {
+      AppState.overlay.isPlaying = false;
+      const playIcon = document.getElementById('video-play-icon');
+      const playText = document.getElementById('video-play-text');
+      if (playIcon) playIcon.textContent = '▶';
+      if (playText) playText.textContent = 'Пуск';
+
+      prescanVideoClip(videoEl, slot).then(() => {
+        // Jump cleanly to auto-detected Impact T2 frame, ready for instant scrub or 0.25x synchronized playback
+        videoEl.pause();
+        AppState.overlay.isPlaying = true;
+        if (playIcon) playIcon.textContent = '⏸';
+        if (playText) playText.textContent = 'Пауза';
+        if (typeof syncHtmlVideosToProgress === 'function') syncHtmlVideosToProgress();
+        if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
+      }).catch(() => {});
+    } else {
+      AppState.overlay.isPlaying = true;
+      videoEl.play().catch(() => {});
     }
   };
 }
@@ -272,8 +280,26 @@ function clearUploadedVideos() {
     window.AIPoseEngine.liveUserPose3D = null;
     window.AIPoseEngine.liveUserLandmarks2D = null;
     window.AIPoseEngine.liveProPose3D = null;
+    window.AIPoseEngine.liveProLandmarks2D = null;
+    window.AIPoseEngine.liveRacket2D = null;
+    window.AIPoseEngine.liveProRacket2D = null;
     window.AIPoseEngine.wristTrail2D = [];
+    window.AIPoseEngine.racketTipTrail2D = [];
+    window.AIPoseEngine.proRacketTipTrail2D = [];
     window.AIPoseEngine.videoMetrics.hasAnalyzedVideo = false;
+    ['user', 'pro'].forEach(s => {
+      if (window.AIPoseEngine.scans && window.AIPoseEngine.scans[s]) {
+        window.AIPoseEngine.scans[s].status = 'idle';
+        window.AIPoseEngine.scans[s]._token = null;
+        window.AIPoseEngine.scans[s].frames = [];
+        window.AIPoseEngine.scans[s].swings = [];
+        window.AIPoseEngine.scans[s].cropBox = null;
+      }
+    });
+    window.AIPoseEngine.videoLock.active = false;
+    window.AIPoseEngine.videoLock.cropBox = null;
+    window.AIPoseEngine.proVideoLock.active = false;
+    window.AIPoseEngine.proVideoLock.cropBox = null;
   }
 
   const stroke = window.ACECUE_STROKES[AppState.overlay.preset] || window.ACECUE_STROKES.forehand;
@@ -284,6 +310,9 @@ function clearUploadedVideos() {
 
   const clrBtn = document.getElementById('btn-clear-video');
   if (clrBtn) clrBtn.classList.add('hidden');
+  const swWrap = document.getElementById('swing-selector-wrap');
+  if (swWrap) swWrap.classList.add('hidden');
+  if (typeof updateAITelemetryBanner === 'function') updateAITelemetryBanner();
   if (typeof renderAceCueSidebar === 'function') renderAceCueSidebar();
   if (typeof renderCauseAndEffectStrip === 'function') renderCauseAndEffectStrip();
 }
@@ -292,40 +321,39 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
   if (!videoEl || videoEl.readyState < 2 || !videoEl.videoWidth) return null;
   const vw = videoEl.videoWidth;
   const vh = videoEl.videoHeight;
-  const baseScale = Math.min(w / vw, h / vh);
 
   const activeLock = lock || (window.AIPoseEngine && window.AIPoseEngine.videoLock);
-  let smartZoom = 1.0;
-  let focusNormX = 0.50;
-  let focusNormY = 0.45;
+  const cropBox = activeLock && activeLock.cropBox ? activeLock.cropBox : null;
 
-  if (activeLock && activeLock.active) {
-    // Use full head-to-shoe span so the head and raised racket are NEVER cropped!
-    const fullSpanNorm = Math.max(0.24, activeLock.fullBodyNormSpan || (activeLock.torsoLegNormSpan ? activeLock.torsoLegNormSpan * 1.38 : 0.36));
-    const unzoomedFullPx = fullSpanNorm * vh * baseScale;
-    const targetFullPx = h * 0.56; // Full player height = 56% of viewport height (leaves 44% headroom & foot margin!)
-    smartZoom = Math.max(1.0, Math.min(1.85, targetFullPx / Math.max(45, unzoomedFullPx))) * Viewer3D.cam.zoom;
-    focusNormX = activeLock.hipNormX || 0.50;
-    const headY = activeLock.headNormY !== undefined ? activeLock.headNormY : Math.max(0.08, (activeLock.shNormY || 0.33) - 0.10);
-    const ankleY = activeLock.ankleNormY || 0.62;
-    focusNormY = (headY + ankleY) * 0.5;
-  }
+  let dw, dh, dx, dy, smartZoom = 1.0, focusNormX = 0.50, focusNormY = 0.50;
 
-  const dw = vw * baseScale * smartZoom;
-  const dh = vh * baseScale * smartZoom;
-
-  // Position player with generous headroom above headY so the head is 100% visible!
-  let dx = (x + w * 0.50) - focusNormX * dw + Viewer3D.cam.panX;
-  let dy = (y + h * 0.53) - focusNormY * dh + (Viewer3D.cam.panY - 32);
-
-  // Headroom safety clamp: ensure headNormY is at least 38px below the top edge y of this viewport!
-  if (activeLock && activeLock.active) {
-    const headY = activeLock.headNormY !== undefined ? activeLock.headNormY : Math.max(0.08, (activeLock.shNormY || 0.33) - 0.10);
-    const headScreenY = dy + headY * dh;
-    const minTopY = y + Math.min(44, h * 0.16);
-    if (headScreenY < minTopY) {
-      dy += (minTopY - headScreenY);
+  if (cropBox) {
+    // Rock-steady Static Stroke Bounding-Box framing: fits 100% of head-to-shoe AND full racket swing arc + 15% padding
+    const cropPxW = Math.max(40, cropBox.spanW * vw);
+    const cropPxH = Math.max(40, cropBox.spanH * vh);
+    const scaleToBox = Math.min(w / cropPxW, h / cropPxH) * Viewer3D.cam.zoom;
+    dw = vw * scaleToBox;
+    dh = vh * scaleToBox;
+    smartZoom = scaleToBox / Math.max(0.001, Math.min(w / vw, h / vh));
+    focusNormX = cropBox.cx;
+    focusNormY = cropBox.cy;
+    dx = (x + w * 0.50) - focusNormX * dw + Viewer3D.cam.panX * 0.25;
+    dy = (y + h * 0.52) - focusNormY * dh;
+  } else {
+    const baseScale = Math.min(w / vw, h / vh);
+    if (activeLock && activeLock.active) {
+      const fullSpanNorm = Math.max(0.24, activeLock.fullBodyNormSpan || 0.36);
+      const unzoomedFullPx = fullSpanNorm * vh * baseScale;
+      smartZoom = Math.max(1.0, Math.min(1.65, (h * 0.56) / Math.max(45, unzoomedFullPx))) * Viewer3D.cam.zoom;
+      focusNormX = activeLock.hipNormX || 0.50;
+      const headY = activeLock.headNormY !== undefined ? activeLock.headNormY : 0.24;
+      const ankleY = activeLock.ankleNormY || 0.62;
+      focusNormY = (headY + ankleY) * 0.5;
     }
+    dw = vw * baseScale * smartZoom;
+    dh = vh * baseScale * smartZoom;
+    dx = (x + w * 0.50) - focusNormX * dw + Viewer3D.cam.panX * 0.25;
+    dy = (y + h * 0.52) - focusNormY * dh;
   }
 
   ctx.save();
@@ -360,8 +388,12 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95, slot = 'user')
   if (!rect || !window.AIPoseEngine) return;
   const lm = slot === 'pro' ? window.AIPoseEngine.liveProLandmarks2D : window.AIPoseEngine.liveUserLandmarks2D;
   if (!lm) return;
-  const lock = window.AIPoseEngine.videoLock;
+  const lock = slot === 'pro' ? window.AIPoseEngine.proVideoLock : window.AIPoseEngine.videoLock;
   const vm = slot === 'pro' ? window.AIPoseEngine.proVideoMetrics : window.AIPoseEngine.videoMetrics;
+  const isProSlot = slot === 'pro';
+  const strokeCol = isProSlot ? "#fbbf24" : "#38bdf8";
+  const glowCol = isProSlot ? "rgba(245, 158, 11, 0.22)" : "rgba(14, 165, 233, 0.22)";
+  const ellipseCol = isProSlot ? "rgba(254, 240, 138, 0.65)" : "rgba(186, 230, 253, 0.65)";
 
   const pt = (idx) => ({
     x: rect.dx + lm[idx].x * rect.dw,
@@ -376,18 +408,18 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95, slot = 'user')
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    ctx.strokeStyle = "rgba(14, 165, 233, 0.22)";
+    ctx.strokeStyle = glowCol;
     ctx.lineWidth = r * 1.4;
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
 
-    ctx.strokeStyle = "#38bdf8";
+    ctx.strokeStyle = strokeCol;
     ctx.lineWidth = 2.6;
     ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
 
     const midX = (p1.x + p2.x) * 0.5;
     const midY = (p1.y + p2.y) * 0.5;
     const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-    ctx.strokeStyle = "rgba(186, 230, 253, 0.65)";
+    ctx.strokeStyle = ellipseCol;
     ctx.lineWidth = 1.1;
     ctx.beginPath();
     ctx.ellipse(midX, midY, r * 0.30, r * 0.68, angle, 0, Math.PI * 2);
@@ -518,7 +550,7 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95, slot = 'user')
   // 4. Joint Nodes
   [pShL, pShR, pElL, pElR, pWrL, pWrR, pHipL, pHipR, pKneeL, pKneeR, pAnkL, pAnkR].forEach(j => {
     const jr = Math.max(2.8, 4.2 * s);
-    ctx.fillStyle = "#0ea5e9";
+    ctx.fillStyle = isProSlot ? "#f59e0b" : "#0ea5e9";
     ctx.beginPath();
     ctx.arc(j.x, j.y, jr, 0, Math.PI * 2);
     ctx.fill();
@@ -529,42 +561,47 @@ function drawDirectVideo3DAthlete(ctx, rect, theme, alpha = 0.95, slot = 'user')
 
   // 5. Head Ring
   const headR = Math.max(7, 13.0 * s);
-  ctx.strokeStyle = "#38bdf8";
+  ctx.strokeStyle = strokeCol;
   ctx.lineWidth = 2.0;
   ctx.beginPath();
   ctx.arc(pHead.x, pHead.y, headR, 0, Math.PI * 2);
   ctx.stroke();
 
   // 6. Orange Elbow-Spacing Caliper on Video (Hitting Elbow to Ribcage)
+  const isLeftDom = lock && lock.activeHand === 'left';
+  const pElHit = isLeftDom ? pElL : pElR;
+  const pWrHit = isLeftDom ? pWrL : pWrR;
+  const pShHit = isLeftDom ? pShL : pShR;
+  const pHipHit = isLeftDom ? pHipL : pHipR;
   const ribPt = {
-    x: (pShR.x + pHipR.x) * 0.5,
-    y: (pShR.y + pHipR.y) * 0.5
+    x: (pShHit.x + pHipHit.x) * 0.5,
+    y: (pShHit.y + pHipHit.y) * 0.5
   };
   ctx.save();
   ctx.strokeStyle = "#f97316";
   ctx.lineWidth = 2.4;
   ctx.setLineDash([4, 3]);
   ctx.beginPath();
-  ctx.moveTo(pElR.x, pElR.y);
+  ctx.moveTo(pElHit.x, pElHit.y);
   ctx.lineTo(ribPt.x, ribPt.y);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.restore();
 
-  // 7. Full Tracked Tennis Racket (Handle, Throat, String Hoop, Sweet-Spot Reticle & Face Normal Vector) on Video!
-  const rk = slot === 'pro' ? window.AIPoseEngine.liveProRacket2D : window.AIPoseEngine.liveRacket2D;
+  // 7. Full Tracked Tennis Racket (Handle, Throat, String Hoop, Sweet-Spot Reticle) on Video!
+  const rk = isProSlot ? window.AIPoseEngine.liveProRacket2D : window.AIPoseEngine.liveRacket2D;
   const rWr = rk
     ? { x: rect.dx + rk.wrist.x * rect.dw, y: rect.dy + rk.wrist.y * rect.dh }
-    : pWrR;
+    : pWrHit;
   const rThroat = rk
     ? { x: rect.dx + rk.throat.x * rect.dw, y: rect.dy + rk.throat.y * rect.dh }
-    : { x: pWrR.x + (pWrR.x - pElR.x) * 0.45, y: pWrR.y + (pWrR.y - pElR.y) * 0.45 };
+    : { x: pWrHit.x + (pWrHit.x - pElHit.x) * 0.45, y: pWrHit.y + (pWrHit.y - pElHit.y) * 0.45 };
   const rHoop = rk
     ? { x: rect.dx + rk.hoop.x * rect.dw, y: rect.dy + rk.hoop.y * rect.dh }
-    : { x: pWrR.x + (pWrR.x - pElR.x) * 0.85, y: pWrR.y + (pWrR.y - pElR.y) * 0.85 };
+    : { x: pWrHit.x + (pWrHit.x - pElHit.x) * 0.85, y: pWrHit.y + (pWrHit.y - pElHit.y) * 0.85 };
   const rTip = rk
     ? { x: rect.dx + rk.tip.x * rect.dw, y: rect.dy + rk.tip.y * rect.dh }
-    : { x: pWrR.x + (pWrR.x - pElR.x) * 1.25, y: pWrR.y + (pWrR.y - pElR.y) * 1.25 };
+    : { x: pWrHit.x + (pWrHit.x - pElHit.x) * 1.25, y: pWrHit.y + (pWrHit.y - pElHit.y) * 1.25 };
 
   ctx.save();
   // Racket Handle & Shaft
@@ -1494,6 +1531,72 @@ function drawViewportHeaderPill(ctx, x, y, text, borderCol, textCol) {
  * - 'ghost' (Full-Screen Direct 3D Rig Overlay + Callouts)
  * - 'curtain' (Interactive Wipe Comparison)
  */
+function drawPrescanProgressOverlay(ctx, x, y, w, h, scan, titleText) {
+  if (!scan || scan.status !== 'scanning') return;
+  ctx.save();
+  ctx.fillStyle = "rgba(7, 11, 18, 0.86)";
+  ctx.fillRect(x, y, w, h);
+
+  const boxW = Math.min(w - 24, 300);
+  const boxH = 88;
+  const bx = x + (w - boxW) * 0.5;
+  const by = y + (h - boxH) * 0.5;
+
+  ctx.fillStyle = "rgba(15, 23, 42, 0.96)";
+  ctx.strokeStyle = "rgba(56, 189, 248, 0.7)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(bx, by, boxW, boxH, 10);
+  else ctx.rect(bx, by, boxW, boxH);
+  ctx.fill();
+  ctx.stroke();
+
+  const pct = Math.round((scan.progress || 0) * 100);
+  ctx.fillStyle = "#fde047";
+  ctx.font = "bold 11px sans-serif";
+  ctx.fillText(titleText || "🔍 AI Pre-Scan видео...", bx + 12, by + 22);
+
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = "10px monospace";
+  ctx.fillText((scan.statusText || `${pct}%`).slice(0, 42), bx + 12, by + 40);
+
+  const barW = boxW - 24;
+  ctx.fillStyle = "#1e293b";
+  ctx.fillRect(bx + 12, by + 52, barW, 10);
+  ctx.fillStyle = "#38bdf8";
+  ctx.fillRect(bx + 12, by + 52, Math.max(4, barW * (scan.progress || 0)), 10);
+
+  ctx.fillStyle = "#34d399";
+  ctx.font = "bold 10px monospace";
+  ctx.fillText(`${pct}%`, bx + barW - 14, by + 76);
+  ctx.restore();
+}
+
+function getActiveKeyframesForSlot(slot, fallbackKeyframes) {
+  const engine = window.AIPoseEngine;
+  const scan = engine && engine.scans ? engine.scans[slot] : null;
+  if (!scan || scan.status !== 'ready' || !scan.frames || scan.frames.length < 3) {
+    return fallbackKeyframes;
+  }
+  const swIdx = scan.activeSwingIdx || 0;
+  const sw = scan.swings[swIdx] || scan.swings[0];
+  if (scan._kfCache && scan._kfSwingIdx === swIdx && scan._kfT2 === (sw ? sw.t2Time : 0)) {
+    return scan._kfCache;
+  }
+  const winFrames = scan.frames.filter(f => f.pose3D && (!sw || (f.time >= sw.startTime && f.time <= sw.endTime)));
+  const useFrames = winFrames.length >= 3 ? winFrames : scan.frames.filter(f => f.pose3D);
+  if (useFrames.length < 3) return fallbackKeyframes;
+  const kfs = useFrames.map(f => ({
+    ...f.pose3D,
+    t: typeof mapClipTimeToProgress === 'function' ? mapClipTimeToProgress(scan, f.time) : 0.5
+  }));
+  kfs.sort((a, b) => a.t - b.t);
+  scan._kfCache = kfs;
+  scan._kfSwingIdx = swIdx;
+  scan._kfT2 = sw ? sw.t2Time : 0;
+  return kfs;
+}
+
 function render3DOverlayStage() {
   const canvas = document.getElementById('overlay-canvas');
   if (!canvas) return;
@@ -1512,48 +1615,42 @@ function render3DOverlayStage() {
 
   const userVid = document.getElementById('user-video-element');
   const proVid = document.getElementById('pro-video-element');
+  const engine = window.AIPoseEngine;
+  const scanU = engine && engine.scans ? engine.scans.user : null;
+  const scanP = engine && engine.scans ? engine.scans.pro : null;
 
-  if (typeof processVideoFrameWithAI === 'function') {
-    const nowMs = performance.now();
-    if (AppState.overlay.userVideoLoaded) processVideoFrameWithAI(userVid, 'user', nowMs);
-    if (AppState.overlay.proVideoLoaded) processVideoFrameWithAI(proVid, 'pro', nowMs + 1);
+  if (typeof applyScannedStateForPhase === 'function') {
+    applyScannedStateForPhase(t);
   }
 
-  const lock = (window.AIPoseEngine && window.AIPoseEngine.videoLock)
-    ? window.AIPoseEngine.videoLock
+  const lock = (engine && engine.videoLock)
+    ? engine.videoLock
     : {
-        active: false,
-        hipNormX: 0.54,
-        hipNormY: 0.46,
-        ankleNormY: 0.58,
-        shNormY: 0.33,
-        torsoLegNormSpan: 0.25,
-        facingSign: -1,
-        matchedYawDeg: -58,
-        matchedPitchDeg: 15,
-        matchedPhaseT: 0.62
+        active: false, hipNormX: 0.54, hipNormY: 0.46, ankleNormY: 0.58, shNormY: 0.33,
+        torsoLegNormSpan: 0.25, facingSign: -1, matchedYawDeg: -72, matchedPitchDeg: 12, matchedPhaseT: 0.62
       };
 
-  const proLock = (window.AIPoseEngine && window.AIPoseEngine.proVideoLock && window.AIPoseEngine.proVideoLock.active)
-    ? window.AIPoseEngine.proVideoLock
+  const proLock = (engine && engine.proVideoLock && engine.proVideoLock.active)
+    ? engine.proVideoLock
     : lock;
-  const autoAlign = Boolean(window.AIPoseEngine ? window.AIPoseEngine.autoAlignEnabled : true);
-  const effectivePhaseT = (AppState.overlay.userVideoLoaded && autoAlign && lock.active)
-    ? lock.matchedPhaseT
-    : t;
+  const autoAlign = Boolean(engine ? engine.autoAlignEnabled : true);
+  const effectivePhaseT = (engine && engine.lockImpactMode) ? 0.62 : t;
 
-  const proPose = (AppState.overlay.proVideoLoaded && window.AIPoseEngine && window.AIPoseEngine.liveProPose3D)
-    ? window.AIPoseEngine.liveProPose3D
-    : interpolate3DPose(stroke.proKeyframes, effectivePhaseT);
+  const proKeyframes = getActiveKeyframesForSlot('pro', stroke.proKeyframes);
+  const userKeyframes = getActiveKeyframesForSlot('user', stroke.userKeyframes);
+
+  const proPose = (AppState.overlay.proVideoLoaded && engine && engine.liveProPose3D)
+    ? engine.liveProPose3D
+    : interpolate3DPose(proKeyframes, effectivePhaseT);
   proPose._phaseT = effectivePhaseT;
 
-  const userPose = (AppState.overlay.userVideoLoaded && window.AIPoseEngine && window.AIPoseEngine.liveUserPose3D)
-    ? window.AIPoseEngine.liveUserPose3D
-    : interpolate3DPose(stroke.userKeyframes, effectivePhaseT);
+  const userPose = (AppState.overlay.userVideoLoaded && engine && engine.liveUserPose3D)
+    ? engine.liveUserPose3D
+    : interpolate3DPose(userKeyframes, effectivePhaseT);
   userPose._phaseT = effectivePhaseT;
 
-  const proCam = (AppState.overlay.userVideoLoaded && autoAlign)
-    ? { yaw: lock.matchedYawDeg, pitch: lock.matchedPitchDeg }
+  const proCam = (AppState.overlay.userVideoLoaded && autoAlign && lock.active)
+    ? { yaw: Viewer3D.cam.yaw, pitch: Viewer3D.cam.pitch }
     : { yaw: Viewer3D.cam.yaw, pitch: Viewer3D.cam.pitch };
 
   const proTheme = {
@@ -1591,71 +1688,82 @@ function render3DOverlayStage() {
   const centerX = w * 0.50 + Viewer3D.cam.panX;
 
   if (AppState.overlay.mode === 'split') {
-    const splitX = Math.round(w * 0.48);
+    const splitX = Math.round(w * 0.50);
 
     // =====================================================================================
-    // LEFT VIEWPORT (0 .. splitX): MODE 1 — SIDE-BY-SIDE COMPARISON (ВАШЕ ВИДЕО vs ПРОФИ)
+    // LEFT VIEWPORT (0 .. splitX): MODE 1 — SIDE-BY-SIDE COLUMNS (ПРОФИ | ВЫ)
     // =====================================================================================
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, splitX, h); ctx.clip();
 
     if (AppState.overlay.userVideoLoaded && AppState.overlay.proVideoLoaded) {
-      // BOTH VIDEOS UPLOADED: Split Left Viewport into Top (Pro Reference Video + AI Skeleton/Racket) & Bottom (Father's Video + AI Skeleton/Racket)
-      const halfH = Math.round(h * 0.5);
+      // BOTH VIDEOS UPLOADED: Two Full-Height Side-by-Side Columns (zero squished vertical headroom!)
+      const colW = Math.round(splitX * 0.5);
+
       ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, splitX, halfH); ctx.clip();
-      const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, splitX, halfH, proLock);
-      if (Viewer3D.layers.show3DOverVideo && proRect && window.AIPoseEngine && window.AIPoseEngine.liveProLandmarks2D) {
+      ctx.beginPath(); ctx.rect(0, 0, colW, h); ctx.clip();
+      const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, colW, h, proLock);
+      if (Viewer3D.layers.show3DOverVideo && proRect && engine && engine.liveProLandmarks2D) {
         drawDirectVideo3DAthlete(ctx, proRect, proTheme, 0.96, 'pro');
       }
+      drawPrescanProgressOverlay(ctx, 0, 0, colW, h, scanP, "⭐ Pre-Scan видео ПРОФИ...");
+      ctx.fillStyle = "rgba(7, 11, 18, 0.78)";
+      ctx.fillRect(6, h - 24, colW - 12, 18);
       ctx.fillStyle = "#fde047";
       ctx.font = "bold 10px sans-serif";
-      ctx.fillText("⭐ ВИДЕО ПРОФИ (ЭТАЛОН + ТРЕКИНГ РАКЕТКИ)", 12, halfH - 8);
+      ctx.fillText("⭐ ПРОФИ (ЭТАЛОН)", 12, h - 11);
       ctx.restore();
 
       ctx.save();
-      ctx.beginPath(); ctx.rect(0, halfH, splitX, h - halfH); ctx.clip();
-      const vidRect = drawCleanVideoCover(ctx, userVid, 0, halfH, splitX, h - halfH, lock);
-      if (Viewer3D.layers.show3DOverVideo && vidRect && window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+      ctx.beginPath(); ctx.rect(colW, 0, splitX - colW, h); ctx.clip();
+      const vidRect = drawCleanVideoCover(ctx, userVid, colW, 0, splitX - colW, h, lock);
+      if (Viewer3D.layers.show3DOverVideo && vidRect && engine && engine.liveUserLandmarks2D) {
         drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.96, 'user');
       }
+      drawPrescanProgressOverlay(ctx, colW, 0, splitX - colW, h, scanU, "📹 Pre-Scan ВАШЕГО видео...");
+      ctx.fillStyle = "rgba(7, 11, 18, 0.78)";
+      ctx.fillRect(colW + 6, h - 24, splitX - colW - 12, 18);
       ctx.fillStyle = "#38bdf8";
       ctx.font = "bold 10px sans-serif";
-      ctx.fillText("📹 ВАШЕ ВИДЕО (AI 3D РИГ + ТРЕКИНГ РАКЕТКИ)", 12, h - 8);
+      ctx.fillText("📹 ВАШЕ ВИДЕО (3D + PCA)", colW + 12, h - 11);
       ctx.restore();
 
-      ctx.strokeStyle = "rgba(251, 191, 36, 0.5)";
+      ctx.strokeStyle = "rgba(251, 191, 36, 0.55)";
       ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(0, halfH); ctx.lineTo(splitX, halfH); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(colW, 0); ctx.lineTo(colW, h); ctx.stroke();
     } else if (AppState.overlay.userVideoLoaded) {
       const vidRect = drawCleanVideoCover(ctx, userVid, 0, 0, splitX, h, lock);
-      if (Viewer3D.layers.show3DOverVideo && vidRect && window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+      if (Viewer3D.layers.show3DOverVideo && vidRect && engine && engine.liveUserLandmarks2D) {
         drawDirectVideo3DAthlete(ctx, vidRect, userTheme, 0.96, 'user');
       }
-      // Picture-in-Picture Pro Reference Mini-Card in Top-Right of Left Viewport for direct side-by-side reference
-      const pipW = 136, pipH = 152, pipX = splitX - pipW - 10, pipY = 44;
-      ctx.fillStyle = "rgba(7, 11, 18, 0.86)";
-      ctx.strokeStyle = "rgba(251, 191, 36, 0.65)";
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(pipX, pipY, pipW, pipH, 8);
-      else ctx.rect(pipX, pipY, pipW, pipH);
-      ctx.fill();
-      ctx.stroke();
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, pipX + pipW * 0.5, pipY + pipH * 0.60, 108, proTheme, 0.95, proCam);
-      ctx.fillStyle = "#fde047";
-      ctx.font = "bold 10px sans-serif";
-      ctx.fillText(`⭐ 3D-База: ${stroke.proName.split('(')[0].trim()}`, pipX + 8, pipY + 14);
+      drawPrescanProgressOverlay(ctx, 0, 0, splitX, h, scanU, "📹 Pre-Scan 3D позы и ракетки...");
+      // Compact Picture-in-Picture Pro Reference Card in Top-Right corner
+      if (!scanU || scanU.status !== 'scanning') {
+        const pipW = 128, pipH = 144, pipX = splitX - pipW - 10, pipY = 42;
+        ctx.fillStyle = "rgba(7, 11, 18, 0.86)";
+        ctx.strokeStyle = "rgba(251, 191, 36, 0.65)";
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(pipX, pipY, pipW, pipH, 8);
+        else ctx.rect(pipX, pipY, pipW, pipH);
+        ctx.fill();
+        ctx.stroke();
+        draw3DVolumetricAthlete(ctx, proPose, proKeyframes, pipX + pipW * 0.5, pipY + pipH * 0.60, 102, proTheme, 0.95, proCam);
+        ctx.fillStyle = "#fde047";
+        ctx.font = "bold 10px sans-serif";
+        ctx.fillText(`⭐ 3D-База: ${stroke.proName.split('(')[0].trim()}`, pipX + 8, pipY + 14);
+      }
     } else if (AppState.overlay.proVideoLoaded) {
       const proRect = drawCleanVideoCover(ctx, proVid, 0, 0, splitX, h, proLock);
-      if (Viewer3D.layers.show3DOverVideo && proRect && window.AIPoseEngine && window.AIPoseEngine.liveProLandmarks2D) {
+      if (Viewer3D.layers.show3DOverVideo && proRect && engine && engine.liveProLandmarks2D) {
         drawDirectVideo3DAthlete(ctx, proRect, proTheme, 0.96, 'pro');
       }
+      drawPrescanProgressOverlay(ctx, 0, 0, splitX, h, scanP, "⭐ Pre-Scan видео ПРОФИ...");
     } else {
       // Side-by-Side Pro (Left) vs User (Right) inside Left Viewport + Optional Camera Framing Guide
       draw3DFloorGrid(ctx, splitX * 0.50, centerY, baseScale * 0.78, proCam);
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, splitX * 0.30, centerY, baseScale * 0.76, proTheme, 0.95, proCam);
-      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, splitX * 0.72, centerY, baseScale * 0.76, userTheme, 0.95, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, proKeyframes, splitX * 0.30, centerY, baseScale * 0.76, proTheme, 0.95, proCam);
+      draw3DVolumetricAthlete(ctx, userPose, userKeyframes, splitX * 0.72, centerY, baseScale * 0.76, userTheme, 0.95, proCam);
 
       ctx.fillStyle = "#fde047";
       ctx.font = "bold 11px sans-serif";
@@ -1663,12 +1771,12 @@ function render3DOverlayStage() {
       ctx.fillStyle = "#38bdf8";
       ctx.fillText(`👤 Вы (Загрузите видео)`, splitX * 0.54, 62);
 
-      if (window.AIPoseEngine && window.AIPoseEngine.showCameraGuide) {
+      if (engine && engine.showCameraGuide) {
         drawCameraAlignmentGuideOverlay(ctx, 0, 0, splitX, h);
       }
     }
 
-    drawViewportHeaderPill(ctx, 12, 12, "🎬 РЕЖИМ 1: СРАВНЕНИЕ РЯДОМ (ВИДЕО + ЭТАЛОН)", "rgba(56, 189, 248, 0.6)", "#7dd3fc");
+    drawViewportHeaderPill(ctx, 12, 12, "🎬 РЕЖИМ 1: СРАВНЕНИЕ РЯДОМ (ПРОФИ | ВЫ)", "rgba(56, 189, 248, 0.6)", "#7dd3fc");
     ctx.restore();
 
     // =====================================================================================
@@ -1682,10 +1790,10 @@ function render3DOverlayStage() {
     ctx.beginPath(); ctx.rect(splitX, 0, rightW, h); ctx.clip();
 
     draw3DFloorGrid(ctx, rightCX, centerY, rigScale, proCam);
-    draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, rightCX, centerY, rigScale, proTheme, 0.90, proCam);
-    draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, rightCX, centerY, rigScale, userTheme, 0.92, proCam);
+    draw3DVolumetricAthlete(ctx, proPose, proKeyframes, rightCX, centerY, rigScale, proTheme, 0.90, proCam);
+    draw3DVolumetricAthlete(ctx, userPose, userKeyframes, rightCX, centerY, rigScale, userTheme, 0.92, proCam);
 
-    // Draw the 3 explicit AceCue Engineering Callouts (21cm Late Contact, 13cm vs 27cm Elbow Spacing, +15° vs +29° Swing Path)
+    // Draw the 3 explicit AceCue Engineering Callouts
     drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, rightCX, centerY, rigScale, proCam, splitX, rightW, h);
 
     drawViewportHeaderPill(ctx, splitX + 12, 12, "🤖 РЕЖИМ 2: ПРЯМОЕ 3D-НАЛОЖЕНИЕ РИГОВ (ВЫ НА ПРОФИ)", "rgba(251, 191, 36, 0.65)", "#fde047");
@@ -1708,10 +1816,10 @@ function render3DOverlayStage() {
     if (vidRectL) {
       const tf = computeLockedProTransform(proPose, vidRectL, lock, proCam);
       draw3DFloorGrid(ctx, tf.cx, tf.cy, tf.scale, proCam);
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, 0.92, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, 0.92, proCam);
     } else {
       draw3DFloorGrid(ctx, centerX, centerY, baseScale, proCam);
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, centerX, centerY, baseScale, proTheme, 0.95, proCam);
+      draw3DVolumetricAthlete(ctx, proPose, proKeyframes, centerX, centerY, baseScale, proTheme, 0.95, proCam);
     }
     ctx.restore();
 
@@ -1720,16 +1828,16 @@ function render3DOverlayStage() {
     if (AppState.overlay.userVideoLoaded) {
       const vidRectR = drawCleanVideoCover(ctx, userVid, 0, 0, w, h, lock);
       if (Viewer3D.layers.show3DOverVideo && vidRectR) {
-        if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+        if (engine && engine.liveUserLandmarks2D) {
           drawDirectVideo3DAthlete(ctx, vidRectR, userTheme, 0.95);
         } else {
           const tf = computeLockedProTransform(userPose, vidRectR, lock, proCam);
-          draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, 0.88, proCam);
+          draw3DVolumetricAthlete(ctx, userPose, userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, 0.88, proCam);
         }
       }
     } else {
       draw3DFloorGrid(ctx, centerX, centerY, baseScale, proCam);
-      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, centerX, centerY, baseScale, userTheme, 0.95, proCam);
+      draw3DVolumetricAthlete(ctx, userPose, userKeyframes, centerX, centerY, baseScale, userTheme, 0.95, proCam);
     }
     ctx.restore();
 
@@ -1755,17 +1863,17 @@ function render3DOverlayStage() {
     if (AppState.overlay.userVideoLoaded && vidRect) {
       if (Viewer3D.layers.show3DOverVideo) {
         const tf = computeLockedProTransform(proPose, vidRect, lock, proCam);
-        if (window.AIPoseEngine && window.AIPoseEngine.liveUserLandmarks2D) {
+        if (engine && engine.liveUserLandmarks2D) {
           drawDirectVideo3DAthlete(ctx, vidRect, userTheme, Math.max(0.65, userAlpha));
         }
-        draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, Math.max(0.65, userAlpha), proCam);
-        draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, Math.max(0.65, proAlpha), proCam);
+        draw3DVolumetricAthlete(ctx, userPose, userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, Math.max(0.65, userAlpha), proCam);
+        draw3DVolumetricAthlete(ctx, proPose, proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, Math.max(0.65, proAlpha), proCam);
         drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, tf.cx, tf.cy, tf.scale, proCam, 0, w, h);
       }
     } else {
       draw3DFloorGrid(ctx, centerX, centerY, baseScale, proCam);
-      draw3DVolumetricAthlete(ctx, proPose, stroke.proKeyframes, centerX, centerY, baseScale, proTheme, Math.max(0.55, proAlpha), proCam);
-      draw3DVolumetricAthlete(ctx, userPose, stroke.userKeyframes, centerX, centerY, baseScale, userTheme, Math.max(0.55, userAlpha), proCam);
+      draw3DVolumetricAthlete(ctx, proPose, proKeyframes, centerX, centerY, baseScale, proTheme, Math.max(0.55, proAlpha), proCam);
+      draw3DVolumetricAthlete(ctx, userPose, userKeyframes, centerX, centerY, baseScale, userTheme, Math.max(0.55, userAlpha), proCam);
       drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, centerX, centerY, baseScale, proCam, 0, w, h);
     }
 

@@ -261,19 +261,26 @@ function onAlphaChange(val) {
 }
 
 function onVideoScrub(val) {
+  if (window.AIPoseEngine) window.AIPoseEngine.lockImpactMode = false;
   AppState.overlay.progress = parseFloat(val) / 1000;
   syncHtmlVideosToProgress();
   if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
 }
 
 function toggleVideoPlay() {
+  if (window.AIPoseEngine && typeof window.AIPoseEngine.lockImpactMode === 'boolean') {
+    window.AIPoseEngine.lockImpactMode = false;
+  }
   AppState.overlay.isPlaying = !AppState.overlay.isPlaying;
   document.getElementById('video-play-icon').textContent = AppState.overlay.isPlaying ? '⏸' : '▶';
   document.getElementById('video-play-text').textContent = AppState.overlay.isPlaying ? 'Пауза' : 'Пуск';
 
   const uv = document.getElementById('user-video-element');
   const pv = document.getElementById('pro-video-element');
-  if (AppState.overlay.isPlaying) {
+  const scans = window.AIPoseEngine ? window.AIPoseEngine.scans : null;
+  const usingScan = scans && ((scans.user && scans.user.status === 'ready') || (scans.pro && scans.pro.status === 'ready'));
+
+  if (AppState.overlay.isPlaying && !usingScan) {
     if (AppState.overlay.userVideoLoaded && uv) uv.play().catch(() => {});
     if (AppState.overlay.proVideoLoaded && pv) pv.play().catch(() => {});
   } else {
@@ -284,6 +291,7 @@ function toggleVideoPlay() {
 }
 
 function stepFrame(dir) {
+  if (window.AIPoseEngine) window.AIPoseEngine.lockImpactMode = false;
   AppState.overlay.isPlaying = false;
   document.getElementById('video-play-icon').textContent = '▶';
   document.getElementById('video-play-text').textContent = 'Пуск';
@@ -316,22 +324,46 @@ function jumpToPhase(phaseKey) {
   const stroke = window.ACECUE_STROKES[AppState.overlay.preset] || window.ACECUE_STROKES.forehand;
   const p = stroke.phases.find(ph => ph.key === phaseKey);
   if (p) {
+    if (window.AIPoseEngine) window.AIPoseEngine.lockImpactMode = (phaseKey === 'T2');
     AppState.overlay.isPlaying = false;
     document.getElementById('video-play-icon').textContent = '▶';
     document.getElementById('video-play-text').textContent = 'Пуск';
+    const uv = document.getElementById('user-video-element');
+    const pv = document.getElementById('pro-video-element');
+    if (uv) uv.pause();
+    if (pv) pv.pause();
     AppState.overlay.progress = p.t;
     document.getElementById('video-scrubber').value = Math.round(p.t * 1000);
     syncHtmlVideosToProgress();
+    if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
   }
 }
 
 function setContactAnchorHere() {
+  if (typeof nudgeImpactT2ToCurrentTime === 'function' && window.AIPoseEngine && window.AIPoseEngine.scans.user.status === 'ready') {
+    nudgeImpactT2ToCurrentTime('user');
+    const sw = window.AIPoseEngine.scans.user.swings[window.AIPoseEngine.scans.user.activeSwingIdx];
+    const tip = document.getElementById('coach-tip-box');
+    if (tip && sw) {
+      tip.innerHTML = `✅ <strong>Точка удара T2 зафиксирована на ${sw.t2Time.toFixed(2)}с!</strong> Окно удара перестроено и синхронизировано с профи.`;
+    }
+    return;
+  }
   AppState.overlay.anchorContactPro = AppState.overlay.progress;
   AppState.overlay.anchorContactUser = AppState.overlay.progress;
   const tip = document.getElementById('coach-tip-box');
   if (tip) {
-    tip.innerHTML = `✅ <strong>Якорь контакта зафиксирован на ${(AppState.overlay.progress * 100).toFixed(0)}%!</strong> Оба потока (Ваше видео и 3D-призрак профи) синхронизированы по точке удара.`;
+    tip.innerHTML = `✅ <strong>Якорь контакта зафиксирован на ${(AppState.overlay.progress * 100).toFixed(0)}%!</strong> Оба потока синхронизированы по точке удара.`;
   }
+}
+
+function nudgeImpactT2Here() {
+  setContactAnchorHere();
+}
+
+function toggleExtraCalibration() {
+  const bar = document.getElementById('video-calibration-bar');
+  if (bar) bar.classList.toggle('hidden');
 }
 
 function handleUserVideoUpload(e) {
@@ -354,15 +386,25 @@ function onPresetChange(val) {
 function syncHtmlVideosToProgress() {
   const uv = document.getElementById('user-video-element');
   const pv = document.getElementById('pro-video-element');
+  const scans = window.AIPoseEngine ? window.AIPoseEngine.scans : null;
+
   if (AppState.overlay.userVideoLoaded && uv && uv.duration) {
-    const clipLen = Math.min(uv.duration, 3.0);
-    const targetT = Math.max(0, Math.min(uv.duration, AppState.overlay.progress * clipLen + Viewer3D.videoSyncOffsetSec));
-    if (Math.abs(uv.currentTime - targetT) > 0.05) uv.currentTime = targetT;
+    const scanU = scans ? scans.user : null;
+    if (scanU && scanU.status === 'scanning') return;
+    const baseT = (scanU && scanU.status === 'ready' && typeof mapProgressToClipTime === 'function')
+      ? mapProgressToClipTime(scanU, AppState.overlay.progress)
+      : AppState.overlay.progress * Math.min(uv.duration, 3.0);
+    const targetT = Math.max(0, Math.min(uv.duration, baseT + (Viewer3D.videoSyncOffsetSec || 0)));
+    if (!uv.seeking && Math.abs(uv.currentTime - targetT) > 0.025) uv.currentTime = targetT;
   }
   if (AppState.overlay.proVideoLoaded && pv && pv.duration) {
-    const clipLen = Math.min(pv.duration, 3.0);
-    const targetT = Math.max(0, Math.min(pv.duration, AppState.overlay.progress * clipLen));
-    if (Math.abs(pv.currentTime - targetT) > 0.05) pv.currentTime = targetT;
+    const scanP = scans ? scans.pro : null;
+    if (scanP && scanP.status === 'scanning') return;
+    const baseT = (scanP && scanP.status === 'ready' && typeof mapProgressToClipTime === 'function')
+      ? mapProgressToClipTime(scanP, AppState.overlay.progress)
+      : AppState.overlay.progress * Math.min(pv.duration, 3.0);
+    const targetT = Math.max(0, Math.min(pv.duration, baseT));
+    if (!pv.seeking && Math.abs(pv.currentTime - targetT) > 0.025) pv.currentTime = targetT;
   }
 }
 
@@ -823,19 +865,15 @@ function appRenderLoop(now) {
 
   try {
     if (AppState.currentTab === 'overlay') {
-      if (AppState.overlay.isPlaying) {
-        const uv = document.getElementById('user-video-element');
+      const scans = window.AIPoseEngine ? window.AIPoseEngine.scans : null;
+      const isScanning = scans && ((scans.user && scans.user.status === 'scanning') || (scans.pro && scans.pro.status === 'scanning'));
+      if (AppState.overlay.isPlaying && !isScanning) {
         const strokeDuration = 2.4;
-        if (AppState.overlay.userVideoLoaded && uv && uv.duration && !uv.paused) {
-          const cycleLen = Math.min(uv.duration, strokeDuration);
-          const rawT = Math.max(0, uv.currentTime - (Viewer3D.videoSyncOffsetSec || 0));
-          AppState.overlay.progress = (rawT % cycleLen) / cycleLen;
-        } else {
-          AppState.overlay.progress += (dt * AppState.overlay.speed) / strokeDuration;
-          if (AppState.overlay.progress >= 1.0) AppState.overlay.progress = 0.0;
-        }
+        AppState.overlay.progress += (dt * AppState.overlay.speed) / strokeDuration;
+        if (AppState.overlay.progress >= 1.0) AppState.overlay.progress = 0.0;
         const scrub = document.getElementById('video-scrubber');
         if (scrub) scrub.value = Math.round(AppState.overlay.progress * 1000);
+        syncHtmlVideosToProgress();
       }
       render3DOverlayStage();
     } else if (AppState.currentTab === 'footwork' && AppState.footwork.isPlaying) {

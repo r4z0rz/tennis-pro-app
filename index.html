@@ -185,16 +185,20 @@
           </span>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2.5">
+        <div class="flex flex-wrap items-center gap-2">
+          <div id="swing-selector-wrap" class="hidden items-center gap-1.5 flex">
+            <span class="text-slate-400 font-semibold">Удар:</span>
+            <select id="swing-selector" onchange="selectSwingIndex(this.value)" class="bg-slate-800 text-xs text-amber-300 font-bold border border-amber-500/40 rounded-lg px-2 py-1 outline-none"></select>
+          </div>
           <label class="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-white font-semibold" title="Автоматически выравнивает неидеальный угол камеры, масштаб и точку удара между эталоном и вашим видео">
             <input type="checkbox" id="chk-ai-auto-align" checked onchange="toggleAIAutoAlign(this.checked)" class="accent-emerald-400 rounded" />
             <span>🤖 AI Выравнивание 3D</span>
           </label>
-          <button onclick="lockImpactFrameNow()" class="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold transition shadow flex items-center gap-1" title="Мгновенно поставить стоп-кадр в точке удара T2 и подсветить разницу 21 см в контакте и 13 см в локте">
-            🎯 Стоп-кадр: Точка Удара (T2)
+          <button onclick="lockImpactFrameNow()" class="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold transition shadow flex items-center gap-1" title="Мгновенно поставить стоп-кадр в точке удара T2 и подсветить расхождения">
+            🎯 Стоп-кадр (T2)
           </button>
-          <button onclick="runAIAutoAlignVideos()" class="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition shadow">
-            ⚡ Авто-синхр. (T2)
+          <button onclick="toggleExtraCalibration()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-semibold transition" title="Показать или скрыть ручную подстройку 3D-масштаба и сдвига времени">
+            ⚙️ Калибровка
           </button>
         </div>
       </div>
@@ -329,9 +333,9 @@
                 <button onclick="setPlaySpeed(1.0, this)" class="speed-btn px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white border border-slate-700">1.0x</button>
               </div>
 
-              <!-- Set Contact Anchor Button -->
-              <button onclick="setContactAnchorHere()" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold flex items-center gap-1">
-                📍 Зафиксировать якорь контакта
+              <!-- Set Contact Anchor / 1-click T2 Nudge Button -->
+              <button onclick="nudgeImpactT2Here()" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold flex items-center gap-1" title="Перенести момент удара T2 прямо на текущий кадр">
+                📍 Отметить T2 здесь
               </button>
             </div>
           </div>
@@ -681,10 +685,10 @@
 
   </main>
 
-  <!-- External Script Logic (Cache-Busted v11) -->
-  <script src="js/strokes3d.js?v=11"></script>
-  <script src="js/ai_pose_align.js?v=11"></script>
-  <script src="js/viewer3d.js?v=11"></script>
-  <script src="js/app.js?v=11"></script>
+  <!-- External Script Logic (Cache-Busted v12) -->
+  <script src="js/strokes3d.js?v=12"></script>
+  <script src="js/ai_pose_align.js?v=12"></script>
+  <script src="js/viewer3d.js?v=12"></script>
+  <script src="js/app.js?v=12"></script>
 </body>
 </html>
