@@ -259,13 +259,17 @@ function loadVideoFileIntoSlot(file, slot) {
       if (playText) playText.textContent = 'Пуск';
 
       prescanVideoClip(videoEl, slot).then(() => {
-        // Jump cleanly to auto-detected Impact T2 frame, ready for instant scrub or 0.25x synchronized playback
-        videoEl.pause();
-        AppState.overlay.isPlaying = true;
-        if (playIcon) playIcon.textContent = '⏸';
-        if (playText) playText.textContent = 'Пауза';
-        if (typeof syncHtmlVideosToProgress === 'function') syncHtmlVideosToProgress();
-        if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
+        // Land cleanly paused at Impact T2 (iOS Safari blocks async .play() outside direct tap; user taps Play for native 0.25x loop)
+        if (typeof jumpToPhase === 'function') {
+          jumpToPhase('T2');
+        } else {
+          videoEl.pause();
+          AppState.overlay.isPlaying = false;
+          if (playIcon) playIcon.textContent = '▶';
+          if (playText) playText.textContent = 'Пуск';
+          if (typeof syncHtmlVideosToProgress === 'function') syncHtmlVideosToProgress(true);
+          if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
+        }
       }).catch(() => {});
     } else {
       AppState.overlay.isPlaying = true;
@@ -322,10 +326,40 @@ function clearUploadedVideos() {
   if (typeof renderCauseAndEffectStrip === 'function') renderCauseAndEffectStrip();
 }
 
+const _videoFrameCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+
+function getPaintedVideoTime(videoEl) {
+  if (!videoEl || videoEl.readyState < 2) return null;
+  if (!videoEl.seeking) return videoEl.currentTime;
+  const cache = _videoFrameCache ? _videoFrameCache.get(videoEl) : null;
+  return (cache && cache.ready) ? cache.time : videoEl.currentTime;
+}
+
 function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
   if (!videoEl || videoEl.readyState < 2 || !videoEl.videoWidth) return null;
   const vw = videoEl.videoWidth;
   const vh = videoEl.videoHeight;
+
+  let cache = _videoFrameCache ? _videoFrameCache.get(videoEl) : null;
+  if (_videoFrameCache && !videoEl.seeking && typeof document !== 'undefined') {
+    if (!cache) {
+      const cw = Math.min(vw, 720);
+      const ch = Math.max(2, Math.round((cw * vh) / Math.max(1, vw)));
+      const off = document.createElement('canvas');
+      off.width = cw;
+      off.height = ch;
+      cache = { canvas: off, ctx: off.getContext('2d'), time: -1, ready: false };
+      _videoFrameCache.set(videoEl, cache);
+    }
+    if (!cache.ready || Math.abs(cache.time - videoEl.currentTime) > 0.002) {
+      try {
+        cache.ctx.drawImage(videoEl, 0, 0, cache.canvas.width, cache.canvas.height);
+        cache.time = videoEl.currentTime;
+        cache.ready = true;
+      } catch (e) {}
+    }
+  }
+  const drawSource = (videoEl.seeking && cache && cache.ready) ? cache.canvas : videoEl;
 
   const activeLock = lock || (window.AIPoseEngine && window.AIPoseEngine.videoLock);
   const cropBox = activeLock && activeLock.cropBox ? activeLock.cropBox : null;
@@ -366,7 +400,7 @@ function drawCleanVideoCover(ctx, videoEl, x, y, w, h, lock) {
   ctx.rect(x, y, w, h);
   ctx.clip();
 
-  ctx.drawImage(videoEl, dx, dy, dw, dh);
+  ctx.drawImage(drawSource, dx, dy, dw, dh);
 
   const playerScreenX = dx + focusNormX * dw;
   const playerScreenY = dy + focusNormY * dh;
@@ -1897,11 +1931,8 @@ function render3DOverlayStage() {
     if (AppState.overlay.userVideoLoaded && vidRect) {
       if (Viewer3D.layers.show3DOverVideo) {
         const tf = computeLockedProTransform(proPose, vidRect, lock, proCam);
-        if (engine && engine.liveUserLandmarks2D) {
-          drawDirectVideo3DAthlete(ctx, vidRect, userTheme, Math.max(0.65, userAlpha));
-        }
-        draw3DVolumetricAthlete(ctx, userPose, userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, Math.max(0.65, userAlpha), proCam);
-        draw3DVolumetricAthlete(ctx, proPose, proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, Math.max(0.65, proAlpha), proCam);
+        draw3DVolumetricAthlete(ctx, userPose, userKeyframes, tf.cx, tf.cy, tf.scale, userTheme, Math.max(0.70, userAlpha), proCam);
+        draw3DVolumetricAthlete(ctx, proPose, proKeyframes, tf.cx, tf.cy, tf.scale, proTheme, Math.max(0.70, proAlpha), proCam);
         drawAceCueBiomechanicalCallouts(ctx, proPose, userPose, tf.cx, tf.cy, tf.scale, proCam, 0, 0, w, h);
       }
     } else {

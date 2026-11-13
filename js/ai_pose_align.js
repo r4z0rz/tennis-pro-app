@@ -908,11 +908,27 @@ function convertWorldLandmarksToCourtPose3D(
 
 function smoothScannedFrames(frames) {
   if (!frames || frames.length < 3) return frames;
-  const kernel = [0.12, 0.22, 0.32, 0.22, 0.12];
-  const radius = 2;
+
+  // Compute per-frame hip-relative wrist speed so fast swing whips aren't smeared/lagged
+  const frameSpds = new Array(frames.length).fill(0);
+  for (let i = 1; i < frames.length; i++) {
+    const a = frames[i - 1], b = frames[i];
+    if (!a.lm2d || !b.lm2d) continue;
+    const dt = Math.max(0.016, b.time - a.time);
+    const spR = Math.hypot((b.lm2d[16].x - b.lm2d[24].x) - (a.lm2d[16].x - a.lm2d[24].x), (b.lm2d[16].y - b.lm2d[24].y) - (a.lm2d[16].y - a.lm2d[24].y)) / dt;
+    const spL = Math.hypot((b.lm2d[15].x - b.lm2d[23].x) - (a.lm2d[15].x - a.lm2d[23].x), (b.lm2d[15].y - b.lm2d[23].y) - (a.lm2d[15].y - a.lm2d[23].y)) / dt;
+    frameSpds[i] = Math.max(spR, spL);
+  }
 
   return frames.map((f, idx) => {
     const out = { ...f };
+    const spd = Math.max(frameSpds[idx], frameSpds[Math.min(frames.length - 1, idx + 1)]);
+    // Velocity-adaptive zero-lag kernel: crisp 88% center during swing whips, gentle 5-tap during idle
+    const radius = spd > 0.45 ? 1 : 2;
+    const kernel = spd > 0.85
+      ? [0.06, 0.88, 0.06]
+      : (spd > 0.45 ? [0.18, 0.64, 0.18] : [0.12, 0.22, 0.32, 0.22, 0.12]);
+
     if (f.lm2d) {
       out.lm2d = f.lm2d.map((pt, jIdx) => {
         let sx = 0, sy = 0, sz = 0, sw = 0;
@@ -952,7 +968,7 @@ function smoothScannedFrames(frames) {
       for (let k = -radius; k <= radius; k++) {
         const nb = frames[clampVal(idx + k, 0, frames.length - 1)];
         if (!nb.racket2d || !nb.racket2d.dir) continue;
-        const w = kernel[k + radius] * (nb.racket2d.source === 'vision' ? 1.35 : 0.75);
+        const w = kernel[k + radius] * (nb.racket2d.source === 'vision' ? 1.45 : 0.72);
         rx += nb.racket2d.dir.x * w;
         ry += nb.racket2d.dir.y * w;
         lenS += Math.hypot(nb.racket2d.tip.x - nb.racket2d.wrist.x, nb.racket2d.tip.y - nb.racket2d.wrist.y) * w;
@@ -963,7 +979,7 @@ function smoothScannedFrames(frames) {
         const ux = rx / dn;
         const uy = ry / dn;
         const lenNorm = lenS / sw;
-        const wr = (out.lm2d && (out.lm2d[16] || out.lm2d[15])) ? f.racket2d.wrist : f.racket2d.wrist;
+        const wr = f.racket2d.wrist;
         const tipX = wr.x + ux * lenNorm;
         const tipY = wr.y + uy * lenNorm;
         out.racket2d = {
@@ -985,7 +1001,7 @@ function smoothScannedFrames(frames) {
  * Finds local maxima in hitting wrist speed as candidate Impact (T2) frames.
  * Extracts clean [T2 - 1.2s .. T2 + 1.2s] windows around each swing.
  */
-function detectImpactSwings(frames, duration, dominantHand = 'right', facingSign = -1) {
+function detectImpactSwings(frames, duration, dominantHand = 'right', facingSign = -1, clipYawDeg = -72) {
   if (!frames || frames.length < 3) {
     const mid = duration ? duration * 0.5 : 1.0;
     return [{
@@ -1000,6 +1016,7 @@ function detectImpactSwings(frames, duration, dominantHand = 'right', facingSign
 
   const wrIdx = dominantHand === 'left' ? 15 : 16;
   const hipIdx = dominantHand === 'left' ? 23 : 24;
+  const shIdx = dominantHand === 'left' ? 11 : 12;
   const speeds = new Array(frames.length).fill(0);
 
   for (let i = 1; i < frames.length; i++) {
@@ -1019,9 +1036,45 @@ function detectImpactSwings(frames, duration, dominantHand = 'right', facingSign
           (b.racket2d.tip.y - b.lm2d[hipIdx].y) - (a.racket2d.tip.y - a.lm2d[hipIdx].y)
         ) / dt
       : wrDisp;
-    // Bonus weight when wrist is positioned forward of hip in hitting direction
-    const forwardBonus = (bRelX * facingSign) > 0.02 ? 1.30 : 0.85;
-    speeds[i] = (wrDisp * 0.60 + tipDisp * 0.40) * forwardBonus;
+
+    // Camera-angle-invariant low-to-high swing arc filter:
+    // True forehand/backhand T2 has a low racket slot BEFORE impact (-0.45..-0.10s) AND a high finish AFTER (+0.12..+0.42s).
+    let hasLowSlotBefore = false;
+    for (let j = i - 1; j >= 0; j--) {
+      const bDt = b.time - frames[j].time;
+      if (bDt < 0.08) continue;
+      if (bDt > 0.50) break;
+      const pm = frames[j].lm2d;
+      if (!pm) continue;
+      const pHipY = (pm[23].y + pm[24].y) * 0.5;
+      const pShY = (pm[11].y + pm[12].y) * 0.5;
+      const pSlotMidY = pShY + (pHipY - pShY) * 0.55;
+      const pTipY = frames[j].racket2d ? frames[j].racket2d.tip.y : pm[wrIdx].y;
+      if (pm[wrIdx].y > pSlotMidY || pTipY > pHipY - 0.04) {
+        hasLowSlotBefore = true;
+        break;
+      }
+    }
+    let hasHighFinishAfter = false;
+    for (let j = i + 1; j < frames.length; j++) {
+      const fDt = frames[j].time - b.time;
+      if (fDt < 0.12) continue;
+      if (fDt > 0.44) break;
+      const fm = frames[j].lm2d;
+      if (!fm) continue;
+      const fShY = Math.min(fm[11].y, fm[12].y);
+      const fTipY = frames[j].racket2d ? frames[j].racket2d.tip.y : fm[wrIdx].y;
+      if (fm[wrIdx].y < fShY + 0.05 || fTipY < fShY - 0.04) {
+        hasHighFinishAfter = true;
+        break;
+      }
+    }
+    const swingArcFactor = (hasLowSlotBefore && hasHighFinishAfter) ? 1.40 : (hasHighFinishAfter ? 0.72 : 0.42);
+
+    // Gentle preference for true contact extension before late vertical ear-wrap follow-through
+    const isVerticalWrap = b.racket2d && b.racket2d.dir && b.racket2d.dir.y < -0.86;
+    const wrapFactor = isVerticalWrap ? 0.85 : 1.0;
+    speeds[i] = (wrDisp * 0.65 + tipDisp * 0.35) * swingArcFactor * wrapFactor;
     frames[i].wristSpeed = speeds[i];
   }
 
@@ -1034,7 +1087,7 @@ function detectImpactSwings(frames, duration, dominantHand = 'right', facingSign
 
   const totalDur = duration || frames[frames.length - 1].time || 2.4;
   const minEdge = totalDur > 1.8 ? 0.42 : 0.10;
-  const maxEdge = totalDur > 1.8 ? totalDur - 0.30 : totalDur - 0.08;
+  const maxEdge = totalDur > 5.0 ? totalDur - 0.65 : (totalDur > 1.8 ? totalDur - 0.30 : totalDur - 0.08);
   const maxSpd = Math.max(...smoothSpd, 0.01);
   const candidates = [];
   for (let i = 1; i < smoothSpd.length - 1; i++) {
@@ -1154,8 +1207,9 @@ function computeStaticCropBox(frames, swingWindow = null) {
 function waitForVideoSeek(videoEl, targetTime) {
   return new Promise((resolve) => {
     const safeT = clampVal(targetTime, 0, Math.max(0, (videoEl.duration || 0) - 0.01));
-    if (Math.abs(videoEl.currentTime - safeT) < 0.008) {
-      resolve();
+    if (Math.abs(videoEl.currentTime - safeT) < 0.008 && !videoEl.seeking) {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+      else resolve();
       return;
     }
     let settled = false;
@@ -1164,9 +1218,13 @@ function waitForVideoSeek(videoEl, targetTime) {
       settled = true;
       videoEl.removeEventListener('seeked', done);
       clearTimeout(tid);
-      resolve();
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => resolve());
+      } else {
+        resolve();
+      }
     };
-    const tid = setTimeout(done, 250);
+    const tid = setTimeout(done, 420);
     videoEl.addEventListener('seeked', done, { once: true });
     try {
       videoEl.currentTime = safeT;
@@ -1259,39 +1317,53 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
 
   if (scan._token !== scanToken) return null;
 
-  // Pass 2: High-FPS dense swing refinement on longer clips (> 7s) around primary peak hip-relative velocity
-  if (duration > 7.0 && rawSamples.length >= 6) {
-    let bestT = duration * 0.5;
-    let bestSpd = 0;
+  // Pass 2: High-FPS dense swing refinement (~24 FPS) around top 2 candidate swing peaks
+  if (duration > 3.5 && rawSamples.length >= 6) {
     const estDomHand = detectClipDominantHand(rawSamples);
     const wIdx = estDomHand === 'left' ? 15 : 16;
     const hIdx = estDomHand === 'left' ? 23 : 24;
+    const peakList = [];
     for (let i = 1; i < rawSamples.length; i++) {
       const a = rawSamples[i - 1];
       const b = rawSamples[i];
       if (!a.lm2d || !b.lm2d) continue;
-      if (b.time < 0.42 || b.time > duration - 0.30) continue;
+      if (b.time < 0.42 || b.time > duration - 0.45) continue;
       const dt = Math.max(0.02, b.time - a.time);
       const relDx = (b.lm2d[wIdx].x - b.lm2d[hIdx].x) - (a.lm2d[wIdx].x - a.lm2d[hIdx].x);
       const relDy = (b.lm2d[wIdx].y - b.lm2d[hIdx].y) - (a.lm2d[wIdx].y - a.lm2d[hIdx].y);
-      const spd = Math.hypot(relDx, relDy) / dt;
-      if (spd > bestSpd) {
-        bestSpd = spd;
-        bestT = b.time;
+      peakList.push({ t: b.time, spd: Math.hypot(relDx, relDy) / dt });
+    }
+    peakList.sort((a, b) => b.spd - a.spd);
+    const refineCenters = [];
+    for (const pk of peakList) {
+      if (refineCenters.every(c => Math.abs(c - pk.t) > 1.50)) {
+        refineCenters.push(pk.t);
+        if (refineCenters.length >= 2) break;
       }
     }
-    const refineStart = Math.max(0, bestT - 1.10);
-    const refineEnd = Math.min(Math.max(0.1, duration - 0.03), bestT + 1.10);
-    const denseCount = 28;
-    for (let k = 0; k < denseCount; k++) {
+    if (refineCenters.length === 0) refineCenters.push(duration * 0.5);
+
+    const perPeakCount = refineCenters.length > 1 ? 26 : 40;
+    const targets = [];
+    for (const cT of refineCenters) {
+      const rStart = Math.max(0, cT - 0.72);
+      const rEnd = Math.min(Math.max(0.1, duration - 0.03), cT + 0.72);
+      for (let k = 0; k < perPeakCount; k++) {
+        const rt = rStart + (k / (perPeakCount - 1)) * Math.max(0.2, rEnd - rStart);
+        if (!targets.some(t0 => Math.abs(t0 - rt) < 0.024) && !rawSamples.some(s => Math.abs(s.time - rt) < 0.024)) {
+          targets.push(rt);
+        }
+      }
+    }
+    targets.sort((a, b) => a - b);
+
+    for (let k = 0; k < targets.length; k++) {
       if (scan._token !== scanToken) return null;
-      const rt = refineStart + (k / (denseCount - 1)) * Math.max(0.2, refineEnd - refineStart);
-      if (rawSamples.some(s => Math.abs(s.time - rt) < 0.032)) continue;
-      const sample = await sampleAtTime(rt);
+      const sample = await sampleAtTime(targets[k]);
       if (!sample) return null;
       rawSamples.push(sample);
-      scan.progress = 0.58 + ((k + 1) / denseCount) * 0.22;
-      scan.statusText = `Детализация удара (${k + 1}/${denseCount}, ~15+ FPS)...`;
+      scan.progress = 0.58 + ((k + 1) / Math.max(1, targets.length)) * 0.22;
+      scan.statusText = `Детализация удара (${k + 1}/${targets.length}, ~24 FPS)...`;
       if (onProgress) onProgress(scan.progress, scan.statusText);
       if (k % 5 === 0 && typeof render3DOverlayStage === 'function') render3DOverlayStage();
       await new Promise(r => setTimeout(r, 0));
@@ -1357,8 +1429,8 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
   // Bidirectional zero-lag smoothing on 2D, 3D worldLandmarks & tracked racket vector
   const smoothed = smoothScannedFrames(assembledFrames);
 
-  // Detect candidate T2 peak impact moments & select the strongest clean primary stroke
-  const swings = detectImpactSwings(smoothed, duration, domHand, facingSign);
+  // Detect candidate T2 peak impact moments & select the strongest clean forward stroke
+  const swings = detectImpactSwings(smoothed, duration, domHand, facingSign, clipYawDeg);
   const bestSwingIdx = swings.reduce((best, s, i) => (s.peakSpeed > swings[best].peakSpeed ? i : best), 0);
   const activeSwing = swings[bestSwingIdx] || swings[0];
 
@@ -1544,6 +1616,8 @@ function interpolateScannedFrame(scan, phaseT) {
     const dx = fA.racket2d.dir.x + (fB.racket2d.dir.x - fA.racket2d.dir.x) * u;
     const dy = fA.racket2d.dir.y + (fB.racket2d.dir.y - fA.racket2d.dir.y) * u;
     const dn = Math.hypot(dx, dy) || 1;
+    const ux = dx / dn;
+    const uy = dy / dn;
     const lerpPt = (a, b) => ({ x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u });
     racket2d = {
       ...fA.racket2d,
@@ -1551,7 +1625,8 @@ function interpolateScannedFrame(scan, phaseT) {
       throat: lerpPt(fA.racket2d.throat, fB.racket2d.throat),
       hoop: lerpPt(fA.racket2d.hoop, fB.racket2d.hoop),
       tip: lerpPt(fA.racket2d.tip, fB.racket2d.tip),
-      dir: { x: dx / dn, y: dy / dn }
+      dir: { x: ux, y: uy },
+      angleDeg: Math.round((-Math.atan2(uy, ux * (scan.facingSign || -1)) * 180) / Math.PI)
     };
   }
 
@@ -1582,29 +1657,63 @@ function interpolateScannedFrame(scan, phaseT) {
   return { time: targetTime, lm2d, racket2d, pose3D, trail };
 }
 
-function applyScannedStateForPhase(phaseT) {
+function applyScannedStateForPhase(phaseT, videoTimes = null) {
   const engine = window.AIPoseEngine;
   const effPhase = engine.lockImpactMode ? 0.62 : clampVal(phaseT, 0, 1);
 
   if (engine.scans.user.status === 'ready') {
-    const interpU = interpolateScannedFrame(engine.scans.user, effPhase);
-    if (interpU) {
-      engine.liveUserLandmarks2D = interpU.lm2d;
-      engine.liveRacket2D = interpU.racket2d;
-      engine.racketTipTrail2D = interpU.trail;
-      engine.liveUserPose3D = interpU.pose3D;
-      engine.videoLock.matchedPhaseT = effPhase;
+    const syncOff = (typeof Viewer3D !== 'undefined' && Viewer3D.videoSyncOffsetSec) ? Viewer3D.videoSyncOffsetSec : 0;
+    const uVid = typeof document !== 'undefined' ? document.getElementById('user-video-element') : null;
+    const uTime = videoTimes && videoTimes.userTime !== undefined
+      ? videoTimes.userTime
+      : (typeof getPaintedVideoTime === 'function' && uVid && uVid.readyState >= 2
+          ? getPaintedVideoTime(uVid)
+          : (uVid && uVid.readyState >= 2 ? uVid.currentTime : null));
+    const uVidPhase = (uTime !== null && Number.isFinite(uTime))
+      ? mapClipTimeToProgress(engine.scans.user, uTime - syncOff)
+      : effPhase;
+
+    // 2D video overlay MUST always lock strictly onto the actually rendered video frame timestamp
+    const interpVidU = interpolateScannedFrame(engine.scans.user, uVidPhase);
+    const interpPhaseU = Math.abs(uVidPhase - effPhase) < 0.004
+      ? interpVidU
+      : interpolateScannedFrame(engine.scans.user, effPhase);
+
+    if (interpVidU) {
+      engine.liveUserLandmarks2D = interpVidU.lm2d;
+      engine.liveRacket2D = interpVidU.racket2d;
+      engine.racketTipTrail2D = interpVidU.trail;
+      engine.videoLock.matchedPhaseT = uVidPhase;
+    }
+    if (interpPhaseU) {
+      engine.liveUserPose3D = interpPhaseU.pose3D;
     }
   }
 
   if (engine.scans.pro.status === 'ready') {
-    const interpP = interpolateScannedFrame(engine.scans.pro, effPhase);
-    if (interpP) {
-      engine.liveProLandmarks2D = interpP.lm2d;
-      engine.liveProRacket2D = interpP.racket2d;
-      engine.proRacketTipTrail2D = interpP.trail;
-      engine.liveProPose3D = interpP.pose3D;
-      engine.proVideoLock.matchedPhaseT = effPhase;
+    const pVid = typeof document !== 'undefined' ? document.getElementById('pro-video-element') : null;
+    const pTime = videoTimes && videoTimes.proTime !== undefined
+      ? videoTimes.proTime
+      : (typeof getPaintedVideoTime === 'function' && pVid && pVid.readyState >= 2
+          ? getPaintedVideoTime(pVid)
+          : (pVid && pVid.readyState >= 2 ? pVid.currentTime : null));
+    const pVidPhase = (pTime !== null && Number.isFinite(pTime))
+      ? mapClipTimeToProgress(engine.scans.pro, pTime)
+      : effPhase;
+
+    const interpVidP = interpolateScannedFrame(engine.scans.pro, pVidPhase);
+    const interpPhaseP = Math.abs(pVidPhase - effPhase) < 0.004
+      ? interpVidP
+      : interpolateScannedFrame(engine.scans.pro, effPhase);
+
+    if (interpVidP) {
+      engine.liveProLandmarks2D = interpVidP.lm2d;
+      engine.liveProRacket2D = interpVidP.racket2d;
+      engine.proRacketTipTrail2D = interpVidP.trail;
+      engine.proVideoLock.matchedPhaseT = pVidPhase;
+    }
+    if (interpPhaseP) {
+      engine.liveProPose3D = interpPhaseP.pose3D;
     }
   }
 }

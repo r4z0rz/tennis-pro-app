@@ -264,8 +264,51 @@ function onAlphaChange(val) {
 function onVideoScrub(val) {
   if (window.AIPoseEngine) window.AIPoseEngine.lockImpactMode = false;
   AppState.overlay.progress = parseFloat(val) / 1000;
-  syncHtmlVideosToProgress();
+  syncHtmlVideosToProgress(true);
   if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
+}
+
+function computeSlotPlaybackRate(scan, speed) {
+  if (scan && scan.status === 'ready' && scan.swings && scan.swings.length > 0) {
+    const sw = scan.swings[scan.activeSwingIdx] || scan.swings[0];
+    const winDur = Math.max(0.4, sw.endTime - sw.startTime);
+    return Math.max(0.12, Math.min(4.0, speed * (winDur / 2.4)));
+  }
+  return Math.max(0.12, Math.min(4.0, speed));
+}
+
+function applyNativePlaybackRates() {
+  const uv = document.getElementById('user-video-element');
+  const pv = document.getElementById('pro-video-element');
+  const scans = window.AIPoseEngine ? window.AIPoseEngine.scans : null;
+  const sp = AppState.overlay.speed;
+  if (uv && AppState.overlay.userVideoLoaded) {
+    uv.playbackRate = computeSlotPlaybackRate(scans ? scans.user : null, sp);
+  }
+  if (pv && AppState.overlay.proVideoLoaded) {
+    pv.playbackRate = computeSlotPlaybackRate(scans ? scans.pro : null, sp);
+  }
+}
+
+function seekVideoWithRedraw(vid, targetT) {
+  if (!vid || !vid.duration) return;
+  const clamped = Math.max(0, Math.min(vid.duration - 0.01, targetT));
+  vid._desiredTargetTime = clamped;
+  if (!vid._seekedHooked) {
+    vid._seekedHooked = true;
+    vid.addEventListener('seeked', () => {
+      if (!AppState.overlay.isPlaying && typeof vid._desiredTargetTime === 'number') {
+        if (Math.abs(vid.currentTime - vid._desiredTargetTime) > 0.02 && !vid.seeking) {
+          try { vid.currentTime = vid._desiredTargetTime; } catch (e) {}
+          return;
+        }
+      }
+      if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
+    });
+  }
+  if (Math.abs(vid.currentTime - clamped) > 0.015) {
+    try { vid.currentTime = clamped; } catch (e) {}
+  }
 }
 
 function toggleVideoPlay() {
@@ -279,9 +322,11 @@ function toggleVideoPlay() {
   const uv = document.getElementById('user-video-element');
   const pv = document.getElementById('pro-video-element');
   const scans = window.AIPoseEngine ? window.AIPoseEngine.scans : null;
-  const usingScan = scans && ((scans.user && scans.user.status === 'ready') || (scans.pro && scans.pro.status === 'ready'));
+  const isScanning = scans && ((scans.user && scans.user.status === 'scanning') || (scans.pro && scans.pro.status === 'scanning'));
 
-  if (AppState.overlay.isPlaying && !usingScan) {
+  if (AppState.overlay.isPlaying && !isScanning) {
+    syncHtmlVideosToProgress(true);
+    applyNativePlaybackRates();
     if (AppState.overlay.userVideoLoaded && uv) uv.play().catch(() => {});
     if (AppState.overlay.proVideoLoaded && pv) pv.play().catch(() => {});
   } else {
@@ -315,10 +360,7 @@ function setPlaySpeed(sp, btnEl) {
   if (btnEl) {
     btnEl.className = "speed-btn px-2 py-1 rounded bg-sky-500/20 text-sky-400 border border-sky-500/40 font-bold";
   }
-  const uv = document.getElementById('user-video-element');
-  const pv = document.getElementById('pro-video-element');
-  if (uv) uv.playbackRate = sp;
-  if (pv) pv.playbackRate = sp;
+  applyNativePlaybackRates();
 }
 
 function jumpToPhase(phaseKey) {
@@ -390,28 +432,38 @@ function onPresetChange(val) {
   if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
 }
 
-function syncHtmlVideosToProgress() {
+function syncHtmlVideosToProgress(forceSeek = false) {
   const uv = document.getElementById('user-video-element');
   const pv = document.getElementById('pro-video-element');
   const scans = window.AIPoseEngine ? window.AIPoseEngine.scans : null;
 
   if (AppState.overlay.userVideoLoaded && uv && uv.duration) {
     const scanU = scans ? scans.user : null;
-    if (scanU && scanU.status === 'scanning') return;
-    const baseT = (scanU && scanU.status === 'ready' && typeof mapProgressToClipTime === 'function')
-      ? mapProgressToClipTime(scanU, AppState.overlay.progress)
-      : AppState.overlay.progress * Math.min(uv.duration, 3.0);
-    const targetT = Math.max(0, Math.min(uv.duration, baseT + (Viewer3D.videoSyncOffsetSec || 0)));
-    if (!uv.seeking && Math.abs(uv.currentTime - targetT) > 0.025) uv.currentTime = targetT;
+    if (!scanU || scanU.status !== 'scanning') {
+      const baseT = (scanU && scanU.status === 'ready' && typeof mapProgressToClipTime === 'function')
+        ? mapProgressToClipTime(scanU, AppState.overlay.progress)
+        : AppState.overlay.progress * Math.min(uv.duration, 3.0);
+      const targetT = Math.max(0, Math.min(uv.duration - 0.01, baseT + (Viewer3D.videoSyncOffsetSec || 0)));
+      if (forceSeek || !AppState.overlay.isPlaying) {
+        seekVideoWithRedraw(uv, targetT);
+      } else if (!uv.seeking && Math.abs(uv.currentTime - targetT) > 0.06) {
+        seekVideoWithRedraw(uv, targetT);
+      }
+    }
   }
   if (AppState.overlay.proVideoLoaded && pv && pv.duration) {
     const scanP = scans ? scans.pro : null;
-    if (scanP && scanP.status === 'scanning') return;
-    const baseT = (scanP && scanP.status === 'ready' && typeof mapProgressToClipTime === 'function')
-      ? mapProgressToClipTime(scanP, AppState.overlay.progress)
-      : AppState.overlay.progress * Math.min(pv.duration, 3.0);
-    const targetT = Math.max(0, Math.min(pv.duration, baseT));
-    if (!pv.seeking && Math.abs(pv.currentTime - targetT) > 0.025) pv.currentTime = targetT;
+    if (!scanP || scanP.status !== 'scanning') {
+      const baseT = (scanP && scanP.status === 'ready' && typeof mapProgressToClipTime === 'function')
+        ? mapProgressToClipTime(scanP, AppState.overlay.progress)
+        : AppState.overlay.progress * Math.min(pv.duration, 3.0);
+      const targetT = Math.max(0, Math.min(pv.duration - 0.01, baseT));
+      if (forceSeek || !AppState.overlay.isPlaying) {
+        seekVideoWithRedraw(pv, targetT);
+      } else if (!pv.seeking && Math.abs(pv.currentTime - targetT) > 0.06) {
+        seekVideoWithRedraw(pv, targetT);
+      }
+    }
   }
 }
 
@@ -875,12 +927,63 @@ function appRenderLoop(now) {
       const scans = window.AIPoseEngine ? window.AIPoseEngine.scans : null;
       const isScanning = scans && ((scans.user && scans.user.status === 'scanning') || (scans.pro && scans.pro.status === 'scanning'));
       if (AppState.overlay.isPlaying && !isScanning) {
-        const strokeDuration = 2.4;
-        AppState.overlay.progress += (dt * AppState.overlay.speed) / strokeDuration;
-        if (AppState.overlay.progress >= 1.0) AppState.overlay.progress = 0.0;
-        const scrub = document.getElementById('video-scrubber');
-        if (scrub) scrub.value = Math.round(AppState.overlay.progress * 1000);
-        syncHtmlVideosToProgress();
+        const uv = document.getElementById('user-video-element');
+        const pv = document.getElementById('pro-video-element');
+        const hasU = AppState.overlay.userVideoLoaded && uv && uv.readyState >= 2 && !uv.paused;
+        const hasP = AppState.overlay.proVideoLoaded && pv && pv.readyState >= 2 && !pv.paused;
+        const scanU = scans ? scans.user : null;
+        const scanP = scans ? scans.pro : null;
+
+        if (hasU || hasP) {
+          const masterIsU = hasU;
+          const master = masterIsU ? uv : pv;
+          const masterScan = masterIsU ? scanU : scanP;
+          const offset = masterIsU ? (Viewer3D.videoSyncOffsetSec || 0) : 0;
+          const swM = (masterScan && masterScan.status === 'ready' && masterScan.swings && masterScan.swings.length)
+            ? (masterScan.swings[masterScan.activeSwingIdx] || masterScan.swings[0])
+            : { startTime: 0, endTime: Math.min(master.duration || 2.4, 3.0) };
+
+          if (!master.seeking) {
+            const mTime = master.currentTime - offset;
+            if (mTime >= swM.endTime - 0.025 || master.ended) {
+              AppState.overlay.progress = 0.0;
+              syncHtmlVideosToProgress(true);
+              applyNativePlaybackRates();
+              if (hasU) uv.play().catch(() => {});
+              if (hasP) pv.play().catch(() => {});
+            } else {
+              AppState.overlay.progress = (masterScan && masterScan.status === 'ready' && typeof mapClipTimeToProgress === 'function')
+                ? mapClipTimeToProgress(masterScan, mTime)
+                : Math.max(0, Math.min(1, mTime / Math.max(0.2, swM.endTime - swM.startTime)));
+
+              // Soft PLL drift lock for secondary video during native playback
+              if (hasU && hasP) {
+                const slave = masterIsU ? pv : uv;
+                const slaveScan = masterIsU ? scanP : scanU;
+                const slaveOff = masterIsU ? 0 : (Viewer3D.videoSyncOffsetSec || 0);
+                if (!slave.seeking && slaveScan && slaveScan.status === 'ready' && typeof mapClipTimeToProgress === 'function') {
+                  const slavePhase = mapClipTimeToProgress(slaveScan, slave.currentTime - slaveOff);
+                  const err = AppState.overlay.progress - slavePhase;
+                  const baseRate = computeSlotPlaybackRate(slaveScan, AppState.overlay.speed);
+                  if (Math.abs(err) > 0.12) {
+                    seekVideoWithRedraw(slave, mapProgressToClipTime(slaveScan, AppState.overlay.progress) + slaveOff);
+                  } else {
+                    slave.playbackRate = Math.max(0.12, Math.min(4.0, baseRate * Math.max(0.65, Math.min(1.45, 1.0 + err * 2.8))));
+                  }
+                }
+              }
+            }
+          }
+          const scrub = document.getElementById('video-scrubber');
+          if (scrub) scrub.value = Math.round(AppState.overlay.progress * 1000);
+        } else {
+          const strokeDuration = 2.4;
+          AppState.overlay.progress += (dt * AppState.overlay.speed) / strokeDuration;
+          if (AppState.overlay.progress >= 1.0) AppState.overlay.progress = 0.0;
+          const scrub = document.getElementById('video-scrubber');
+          if (scrub) scrub.value = Math.round(AppState.overlay.progress * 1000);
+          syncHtmlVideosToProgress();
+        }
       }
       render3DOverlayStage();
     } else if (AppState.currentTab === 'footwork' && AppState.footwork.isPlaying) {
