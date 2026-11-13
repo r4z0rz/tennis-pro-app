@@ -34,44 +34,28 @@
 <body class="bg-slate-950 text-slate-100 min-h-screen antialiased select-none font-sans">
 
   <!-- Top Navigation & Global Header -->
-  <header class="border-b border-slate-800 bg-slate-900/90 sticky top-0 z-50 backdrop-blur px-4 py-2.5">
-    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+  <header class="border-b border-slate-800 bg-slate-900/95 sticky top-0 z-50 backdrop-blur px-3 py-1.5 sm:px-4 sm:py-2.5">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 sm:gap-3">
       <!-- App Brand & ATP Consultant Badge -->
-      <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-amber-500 to-sky-500 flex items-center justify-center font-black text-slate-950 text-base shadow-lg shadow-sky-500/20">
+      <div class="flex items-center gap-2 sm:gap-3">
+        <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-tr from-amber-500 to-sky-500 flex items-center justify-center font-black text-slate-950 text-sm sm:text-base shadow-lg shadow-sky-500/20">
           🎾
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <h1 class="text-base font-bold tracking-tight text-white">Tennis Pro Analytics <span class="text-sky-400">3D</span></h1>
-            <span class="px-2 py-0.5 rounded text-xs font-bold tracking-wide uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+            <h1 class="text-sm sm:text-base font-bold tracking-tight text-white">Tennis Pro Analytics <span class="text-sky-400">3D</span></h1>
+            <span class="hidden md:inline-flex px-2 py-0.5 rounded text-xs font-bold tracking-wide uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
               AceCue AI × ATP 3D Engine
             </span>
           </div>
-          <p class="text-xs text-slate-400">3D Ghost-биомеханика стоп и корпуса, видео-наложение, оценка AceCue /10 и телеметрия Hawkeye</p>
+          <p class="hidden sm:block text-xs text-slate-400">3D Ghost-биомеханика стоп и корпуса, видео-наложение, оценка AceCue /10 и телеметрия Hawkeye</p>
         </div>
       </div>
 
-      <!-- Navigation Tabs (4 Core Modules) -->
-      <div class="flex flex-wrap items-center gap-1.5 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60" id="module-tabs">
-        <button onclick="switchTab('overlay')" id="tab-overlay" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all bg-sky-500 text-slate-950 shadow-md">
-          🧊 1. 3D Ghost & Видео-наложение
-        </button>
-        <button onclick="switchTab('heatmap')" id="tab-heatmap" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
-          🎯 2. Карта зон и ударов
-        </button>
-        <button onclick="switchTab('footwork')" id="tab-footwork" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
-          👟 3. Трекинг движений и сплит
-        </button>
-        <button onclick="switchTab('telemetry')" id="tab-telemetry" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
-          ⚡ 4. Физика полёта и радар
-        </button>
-      </div>
-
-      <!-- Quick Session Indicator & Mode -->
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-slate-400">Элемент (AceCue 3D):</span>
-        <select id="preset-selector" onchange="onPresetChange(this.value)" class="bg-slate-800 text-xs text-slate-200 border border-slate-700 rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-sky-500 outline-none">
+      <!-- Quick Session Indicator & Mode (Right on top row on mobile too) -->
+      <div class="flex items-center gap-1.5 sm:order-3">
+        <span class="hidden md:inline text-xs text-slate-400">Элемент (AceCue 3D):</span>
+        <select id="preset-selector" onchange="onPresetChange(this.value)" class="bg-slate-800 text-[11px] sm:text-xs text-slate-200 border border-slate-700 rounded-lg px-2 py-1 sm:px-2.5 sm:py-1.5 focus:ring-1 focus:ring-sky-500 outline-none max-w-[168px] sm:max-w-none truncate">
           <option value="forehand_fed">Удар справа (Forehand): Федерер vs Вы — 7.6/10</option>
           <option value="serve_alcaraz">Подача (Serve): Алькарас vs Вы — 6.8/10</option>
           <option value="backhand_djok">Удар слева (2H Backhand): Джокович vs Вы — 8.1/10</option>
@@ -79,11 +63,27 @@
           <option value="smash">Смэш (Overhead Smash): Джокович vs Вы — 7.4/10</option>
         </select>
       </div>
+
+      <!-- Navigation Tabs (4 Core Modules - compact horizontal scroll on mobile) -->
+      <div class="w-full sm:w-auto sm:order-2 flex flex-nowrap overflow-x-auto items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60" id="module-tabs">
+        <button onclick="switchTab('overlay')" id="tab-overlay" class="whitespace-nowrap px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all bg-sky-500 text-slate-950 shadow-md">
+          🧊 1. 3D Ghost
+        </button>
+        <button onclick="switchTab('heatmap')" id="tab-heatmap" class="whitespace-nowrap px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
+          🎯 2. Карта зон
+        </button>
+        <button onclick="switchTab('footwork')" id="tab-footwork" class="whitespace-nowrap px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
+          👟 3. Трекинг ног
+        </button>
+        <button onclick="switchTab('telemetry')" id="tab-telemetry" class="whitespace-nowrap px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-700/60 transition-all">
+          ⚡ 4. Радар
+        </button>
+      </div>
     </div>
   </header>
 
   <!-- Main App Viewport Container -->
-  <main class="max-w-7xl mx-auto p-4 space-y-4">
+  <main class="max-w-7xl mx-auto p-2 sm:p-4 space-y-2 sm:space-y-4">
 
     <!-- ========================================================================================= -->
     <!-- МОДУЛЬ 1: 3D VOLUMETRIC GHOST & REAL VIDEO OVERLAY STUDIO                                 -->
@@ -91,26 +91,26 @@
     <section id="module-overlay-section" class="space-y-3">
       
       <!-- Top Control Bar of Module 1 -->
-      <div class="glass-panel rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div class="glass-panel rounded-xl p-2 sm:p-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3 text-[11px] sm:text-xs">
         <!-- View Modes -->
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="font-semibold text-slate-400">Экран:</span>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="hidden sm:inline font-semibold text-slate-400">Экран:</span>
           <div class="inline-flex rounded-lg bg-slate-800 p-0.5 border border-slate-700">
-            <button onclick="setOverlayMode('split')" id="mode-split-btn" class="px-2.5 py-1 rounded-md font-semibold bg-sky-500 text-slate-950 shadow">⚡ 2-в-1: Рядом + Прямое 3D-Наложение</button>
-            <button onclick="setOverlayMode('ghost')" id="mode-ghost-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">🤖 Только 3D-Наложение (Во весь экран)</button>
-            <button onclick="setOverlayMode('curtain')" id="mode-curtain-btn" class="px-2.5 py-1 rounded-md font-medium text-slate-300 hover:text-white">🎬 Шторка (Wipe)</button>
+            <button onclick="setOverlayMode('split')" id="mode-split-btn" class="px-2 py-1 sm:px-2.5 rounded-md font-semibold bg-sky-500 text-slate-950 shadow">⚡ 2-в-1: Рядом + 3D</button>
+            <button onclick="setOverlayMode('ghost')" id="mode-ghost-btn" class="px-2 py-1 sm:px-2.5 rounded-md font-medium text-slate-300 hover:text-white">🤖 3D-Наложение</button>
+            <button onclick="setOverlayMode('curtain')" id="mode-curtain-btn" class="px-2 py-1 sm:px-2.5 rounded-md font-medium text-slate-300 hover:text-white">🎬 Шторка</button>
           </div>
         </div>
 
         <!-- Alpha Blend Slider -->
-        <div id="alpha-controls" class="flex items-center gap-2 opacity-40 pointer-events-none">
+        <div id="alpha-controls" class="hidden sm:flex items-center gap-2 opacity-40 pointer-events-none">
           <span class="text-slate-400">Баланс (Профи ⇄ Вы):</span>
           <input type="range" id="alpha-slider" min="0" max="100" value="50" oninput="onAlphaChange(this.value)" class="w-24 h-1.5" />
           <span id="alpha-label" class="font-mono text-sky-400 w-9">50%</span>
         </div>
 
         <!-- 3D Visual Layers Checkboxes -->
-        <div class="flex flex-wrap items-center gap-3 border-l border-slate-800 pl-3">
+        <div class="hidden md:flex flex-wrap items-center gap-3 border-l border-slate-800 pl-3">
           <label class="inline-flex items-center gap-1 cursor-pointer text-slate-300 hover:text-white">
             <input type="checkbox" id="chk-3d-feet" checked onchange="onToggle3DLayer()" class="accent-sky-400 rounded" />
             <span>👟 Стопы и вес</span>
@@ -126,20 +126,20 @@
         </div>
 
         <!-- Real Video File Uploaders & Camera Setup Guide Button -->
-        <div class="flex flex-wrap items-center gap-2">
-          <button onclick="toggleCameraGuideModal()" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 hover:text-white font-semibold transition flex items-center gap-1 shadow-sm" title="Инструкция по установке телефона на штатив/сетку для идеального 3D-трекинга">
+        <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <button onclick="toggleCameraGuideModal()" class="hidden sm:flex px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 hover:text-white font-semibold transition items-center gap-1 shadow-sm" title="Инструкция по установке телефона на штатив/сетку для идеального 3D-трекинга">
             <span>📐 Гид камеры (45° / 4.5м)</span>
           </button>
-          <label class="px-2.5 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 cursor-pointer text-sky-300 hover:text-white font-semibold transition flex items-center gap-1.5 shadow-sm">
-            <span>📹 Загрузить своё видео</span>
+          <label class="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/50 cursor-pointer text-sky-300 hover:text-white font-semibold transition flex items-center gap-1 shadow-sm">
+            <span>📹 Ваше видео</span>
             <input type="file" id="user-video-input" accept="video/*" class="hidden" onchange="handleUserVideoUpload(event)" />
           </label>
-          <label class="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 cursor-pointer text-amber-300 hover:text-white font-semibold transition flex items-center gap-1.5 shadow-sm">
+          <label class="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 cursor-pointer text-amber-300 hover:text-white font-semibold transition flex items-center gap-1 shadow-sm">
             <span>⭐ Видео профи</span>
             <input type="file" id="pro-video-input" accept="video/*" class="hidden" onchange="handleProVideoUpload(event)" />
           </label>
-          <button id="btn-clear-video" onclick="clearUploadedVideos()" class="hidden px-2 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-semibold transition">
-            ✕ Сбросить видео
+          <button id="btn-clear-video" onclick="clearUploadedVideos()" class="hidden px-2 py-1 sm:py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 font-semibold transition">
+            ✕ Сбросить
           </button>
         </div>
       </div>
@@ -173,32 +173,32 @@
         </div>
       </div>
 
-      <!-- AI Camera Angle & Dual Video Auto-Alignment Bar (Always Visible) -->
-      <div class="glass-panel rounded-xl px-3.5 py-2.5 border border-emerald-500/30 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div class="flex flex-wrap items-center gap-2.5">
-          <div id="ai-align-status-badge" class="px-2.5 py-1 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono text-xs font-bold flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            🤖 100% АВТО-СИНХРОНИЗАЦИЯ И 3D-РИГ АКТИВНЫ (ТОЧКА УДАРА T2)
+      <!-- AI Camera Angle & Dual Video Auto-Alignment Bar (Compact) -->
+      <div class="glass-panel rounded-xl px-2.5 py-1.5 sm:px-3.5 sm:py-2 border border-emerald-500/30 bg-slate-900/90 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <div id="ai-align-status-badge" class="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-bold flex items-center gap-1.5 truncate">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+            <span class="truncate">🤖 3D-СИНХРОНИЗАЦИЯ T2</span>
           </div>
-          <span id="ai-angle-metrics-text" class="text-slate-300 font-mono text-xs">
+          <span id="ai-angle-metrics-text" class="hidden sm:inline text-slate-300 font-mono text-xs">
             3D-Диагностика: <strong class="text-rose-400">Точка удара на 21 см ПОЗЖЕ (+17 см vs +38 см)</strong> • <strong class="text-amber-300">Локоть зажат (13 см vs 27 см)</strong> • <strong class="text-sky-300">Траектория +15° vs +29°</strong>
           </span>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          <div id="swing-selector-wrap" class="hidden items-center gap-1.5 flex">
+        <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div id="swing-selector-wrap" class="hidden items-center gap-1 flex">
             <span class="text-slate-400 font-semibold">Удар:</span>
-            <select id="swing-selector" onchange="selectSwingIndex(this.value)" class="bg-slate-800 text-xs text-amber-300 font-bold border border-amber-500/40 rounded-lg px-2 py-1 outline-none"></select>
+            <select id="swing-selector" onchange="selectSwingIndex(this.value)" class="bg-slate-800 text-[11px] sm:text-xs text-amber-300 font-bold border border-amber-500/40 rounded-lg px-2 py-0.5 sm:py-1 outline-none"></select>
           </div>
-          <label class="inline-flex items-center gap-1.5 cursor-pointer text-emerald-300 hover:text-white font-semibold" title="Автоматически выравнивает неидеальный угол камеры, масштаб и точку удара между эталоном и вашим видео">
+          <label class="inline-flex items-center gap-1 cursor-pointer text-emerald-300 hover:text-white font-semibold" title="Автоматически выравнивает неидеальный угол камеры, масштаб и точку удара между эталоном и вашим видео">
             <input type="checkbox" id="chk-ai-auto-align" checked onchange="toggleAIAutoAlign(this.checked)" class="accent-emerald-400 rounded" />
-            <span>🤖 AI Выравнивание 3D</span>
+            <span>🤖 AI 3D</span>
           </label>
-          <button onclick="lockImpactFrameNow()" class="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold transition shadow flex items-center gap-1" title="Мгновенно поставить стоп-кадр в точке удара T2 и подсветить расхождения">
-            🎯 Стоп-кадр (T2)
+          <button onclick="lockImpactFrameNow()" class="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold transition shadow flex items-center gap-1" title="Мгновенно поставить стоп-кадр в точке удара T2 и подсветить расхождения">
+            🎯 T2
           </button>
-          <button onclick="toggleExtraCalibration()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-semibold transition" title="Показать или скрыть ручную подстройку 3D-масштаба и сдвига времени">
-            ⚙️ Калибровка
+          <button onclick="toggleExtraCalibration()" class="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-semibold transition" title="Показать или скрыть ручную подстройку 3D-масштаба и сдвига времени">
+            ⚙️
           </button>
         </div>
       </div>
@@ -238,7 +238,8 @@
         
         <!-- Left: Interactive 3D & Video Stage (8 cols) -->
         <div class="col-span-12 lg:col-span-8 flex flex-col gap-2">
-          <div id="canvas-dropzone" class="relative w-full aspect-[16/10] bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
+          <!-- Unobstructed Stage Container (No Floating HUD Bars Inside!) -->
+          <div id="canvas-dropzone" class="relative w-full aspect-[4/5] sm:aspect-[16/10] bg-slate-900 rounded-xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
             
             <!-- Real HTML5 Video Elements (Used as texture sources for Canvas) -->
             <video id="pro-video-element" class="hidden" playsinline muted loop crossorigin="anonymous"></video>
@@ -253,44 +254,28 @@
                 ⇄
               </div>
             </div>
+          </div>
 
-            <!-- Top Left Overlay Badges (Compact & Non-Blocking) -->
-            <div class="hidden absolute top-2 left-2 flex-wrap items-center gap-1.5 pointer-events-none opacity-85">
-              <span id="badge-pro" class="px-2 py-0.5 rounded bg-amber-500/90 text-slate-950 font-bold text-[10px] shadow">
-                ⭐ 3D ЭТАЛОН ATP: РОДЖЕР ФЕДЕРЕР
-              </span>
-              <span id="badge-user" class="px-2 py-0.5 rounded bg-sky-500/90 text-slate-950 font-bold text-[10px] shadow">
-                👤 3D GHOST УЧЕНИКА (ИЛИ ВАШЕ ВИДЕО)
-              </span>
+          <!-- External Stage Toolbar: 3D Camera Angles + Phase/Weight Telemetry (ZERO occlusion on video/3D!) -->
+          <div class="glass-panel rounded-xl px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs">
+            <div class="flex flex-wrap items-center gap-2 font-mono">
+              <span class="text-slate-400">Фаза: <strong id="hud-phase-name" class="text-amber-400">T2 — Контакт</strong></span>
+              <span class="text-slate-600 hidden sm:inline">|</span>
+              <span class="text-slate-400">Вес (Профи vs Вы): <strong id="hud-weight-transfer" class="text-sky-400">84% vs 48%</strong></span>
             </div>
-
-            <!-- Top Right 3D Camera Angle Presets -->
-            <div class="absolute top-3 right-3 flex flex-wrap items-center gap-1 bg-slate-950/85 backdrop-blur border border-slate-700/80 rounded-lg p-1 text-xs">
-              <button onclick="set3DCameraPreset('iso')" class="px-2 py-1 rounded hover:bg-slate-800 text-sky-300 font-semibold transition" title="Изометрия 3/4">
+            <div class="flex flex-wrap items-center gap-1 bg-slate-950/80 border border-slate-800 rounded-lg p-0.5">
+              <button onclick="set3DCameraPreset('iso')" class="px-2 py-0.5 rounded hover:bg-slate-800 text-sky-300 font-semibold transition" title="Изометрия 3/4">
                 📐 3/4
               </button>
-              <button onclick="set3DCameraPreset('side')" class="px-2 py-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition" title="Вид сбоку (Профиль — вынос точки контакта)">
+              <button onclick="set3DCameraPreset('side')" class="px-2 py-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition" title="Вид сбоку (Профиль — вынос точки контакта)">
                 👁️ Сбоку
               </button>
-              <button onclick="set3DCameraPreset('top')" class="px-2 py-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition" title="Вид сверху (Стопы, углы стойки и X-Factor)">
-                👟 Сверху (Стопы)
+              <button onclick="set3DCameraPreset('top')" class="px-2 py-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition" title="Вид сверху (Стопы, углы стойки и X-Factor)">
+                👟 Сверху
               </button>
-              <button onclick="set3DCameraPreset('back')" class="px-2 py-1 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition" title="Вид со спины (Вдоль корта)">
+              <button onclick="set3DCameraPreset('back')" class="px-2 py-0.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition" title="Вид со спины (Вдоль корта)">
                 🎾 Сзади
               </button>
-            </div>
-
-            <!-- Bottom Telemetry HUD on Canvas -->
-            <div class="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2 pointer-events-none text-xs">
-              <div class="bg-slate-950/85 backdrop-blur border border-slate-700/70 rounded-lg px-2.5 py-1 font-mono text-slate-200">
-                Фаза: <span id="hud-phase-name" class="text-amber-400 font-bold">T2 — Точка контакта (Contact)</span>
-              </div>
-              <div class="bg-slate-950/85 backdrop-blur border border-slate-700/70 rounded-lg px-2.5 py-1 font-mono text-slate-200">
-                Вес на ногах (Профи vs Вы): <span id="hud-weight-transfer" class="text-sky-400 font-bold">Передняя 84% vs 48%</span>
-              </div>
-              <div class="bg-slate-950/85 backdrop-blur border border-slate-700/70 rounded-lg px-2.5 py-1 font-mono text-slate-400">
-                🖱️ Зажмите мышь для 3D-вращения ракурса
-              </div>
             </div>
           </div>
 
@@ -685,10 +670,10 @@
 
   </main>
 
-  <!-- External Script Logic (Cache-Busted v13) -->
-  <script src="js/strokes3d.js?v=13"></script>
-  <script src="js/ai_pose_align.js?v=13"></script>
-  <script src="js/viewer3d.js?v=13"></script>
-  <script src="js/app.js?v=13"></script>
+  <!-- External Script Logic (Cache-Busted v14) -->
+  <script src="js/strokes3d.js?v=14"></script>
+  <script src="js/ai_pose_align.js?v=14"></script>
+  <script src="js/viewer3d.js?v=14"></script>
+  <script src="js/app.js?v=14"></script>
 </body>
 </html>

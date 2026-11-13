@@ -328,7 +328,8 @@ function detectRacketPixelsInFrame(
   elbowNorm,
   handNorm,
   facingSign = -1,
-  prevDir = null
+  prevDir = null,
+  bodyBoxNorm = null
 ) {
   const wx = (wristNorm && wristNorm.x !== undefined ? wristNorm.x : 0.5) * width;
   const wy = (wristNorm && wristNorm.y !== undefined ? wristNorm.y : 0.5) * height;
@@ -369,6 +370,11 @@ function detectRacketPixelsInFrame(
     const y0 = Math.max(1, Math.floor(wy - maxSearchR));
     const y1 = Math.min(height - 2, Math.ceil(wy + maxSearchR));
 
+    const bx0 = bodyBoxNorm ? bodyBoxNorm.minX * width : -1;
+    const bx1 = bodyBoxNorm ? bodyBoxNorm.maxX * width : -1;
+    const by0 = bodyBoxNorm ? bodyBoxNorm.minY * height : -1;
+    const by1 = bodyBoxNorm ? bodyBoxNorm.maxY * height : -1;
+
     let sumW = 0;
     let sumX = 0, sumY = 0;
     const ptsX = [];
@@ -392,29 +398,37 @@ function detectRacketPixelsInFrame(
         const lum = currGray[idx];
         const fg = bgGray ? Math.abs(lum - bgGray[idx]) : 0;
         const mot = prevGray ? Math.abs(lum - prevGray[idx]) : 0;
+
+        // Mask static dark clothing/skirt/shorts inside hip-to-knee body column unless fast racket motion blur
+        if (bodyBoxNorm && x >= bx0 && x <= bx1 && y >= by0 && y <= by1 && mot < 26) continue;
         const gx = Math.abs(currGray[idx + 1] - currGray[idx - 1]);
         const gy = Math.abs(currGray[idx + width] - currGray[idx - width]);
         const edge = gx + gy;
 
-        // Weighted score emphasizing moving / foreground racket frame & string edges
+        // Weighted score emphasizing active foreground/moving racket shaft & hoop over static walls
         let score = 0;
-        if (bgGray && fg > 16) score += fg * 1.15;
-        if (prevGray && mot > 14) score += mot * 1.1;
-        if (edge > 28 && (!bgGray || fg > 10 || mot > 10)) score += edge * 0.45;
+        if (bgGray && fg > 22) score += fg * 1.2;
+        if (prevGray && mot > 16) score += mot * 1.35;
+        if (edge > 30 && (!bgGray || fg > 14 || mot > 12)) score += edge * 0.42;
         if (!bgGray && !prevGray && edge > 34) score += edge * 0.7;
 
-        if (score > 20) {
-          // Slight angular consistency bonus with kinematic / previous direction
+        if (score > 24) {
+          // Suppress pixels deep behind the hand-knuckle axis during slow motion (prevents leg/banner hijack)
+          const invR = 1 / (r + 1e-4);
+          const dotK = (dx * kdx + dy * kdy) * invR;
+          if (dotK < -0.35 && mot < 18) score *= 0.25;
           if (prevDir) {
-            const dotP = (dx * prevDir.x + dy * prevDir.y) / (r + 1e-4);
-            if (dotP > 0.1) score *= (1.0 + dotP * 0.35);
+            const dotP = (dx * prevDir.x + dy * prevDir.y) * invR;
+            if (dotP > 0.15) score *= (1.0 + dotP * 0.40);
           }
-          ptsX.push(dx);
-          ptsY.push(dy);
-          ptsW.push(score);
-          sumW += score;
-          sumX += dx * score;
-          sumY += dy * score;
+          if (score > 20) {
+            ptsX.push(dx);
+            ptsY.push(dy);
+            ptsW.push(score);
+            sumW += score;
+            sumX += dx * score;
+            sumY += dy * score;
+          }
         }
       }
     }
@@ -462,7 +476,8 @@ function detectRacketPixelsInFrame(
       }
 
       // 92nd percentile projection along ray to measure racket length from grip to tip
-      if (eigenRatio >= 1.9) {
+      const knuckAlign = vx * kdx + vy * kdy;
+      if (eigenRatio >= 2.0 && knuckAlign >= -0.05) {
         const projs = [];
         for (let i = 0; i < ptsX.length; i++) {
           const proj = ptsX[i] * vx + ptsY[i] * vy;
@@ -474,10 +489,11 @@ function detectRacketPixelsInFrame(
         if (projs.length >= 6) {
           projs.sort((a, b) => a - b);
           const p92 = projs[Math.min(projs.length - 1, Math.floor(projs.length * 0.92))];
-          // Blend slowly if eigen-axis jumped dramatically vs previous frame
-          if (prevDir && vx * prevDir.x + vy * prevDir.y < 0.25) {
-            ux = vx * 0.55 + prevDir.x * 0.45;
-            uy = vy * 0.55 + prevDir.y * 0.45;
+          // Smooth moderate eigen-ratio updates against previous direction to prevent single-frame vertical spikes
+          if (prevDir && (vx * prevDir.x + vy * prevDir.y < 0.30 || eigenRatio < 3.0)) {
+            const wNew = eigenRatio >= 3.0 ? 0.58 : 0.68;
+            ux = vx * wNew + prevDir.x * (1 - wNew);
+            uy = vy * wNew + prevDir.y * (1 - wNew);
             const n = Math.hypot(ux, uy) || 1;
             ux /= n;
             uy /= n;
@@ -547,10 +563,12 @@ function estimateClipCourtYawDeg(rawFrames) {
   if (!rawFrames || rawFrames.length === 0) return -72;
   let votesLeftRight = 0;
   let shoulderNormSum = 0;
-  let validShCount = 0;
-  let noseDepthVote = 0;
+  let weightSum = 0;
+  let noseDepthSum = 0;
+  let noseWeightSum = 0;
 
-  for (const f of rawFrames) {
+  for (let i = 0; i < rawFrames.length; i++) {
+    const f = rawFrames[i];
     const lm = f.lm2d;
     const lm3 = f.lm3d;
     if (!lm || lm.length < 33) continue;
@@ -559,6 +577,18 @@ function estimateClipCourtYawDeg(rawFrames) {
     const ankMidY = Math.max(lm[27].y, lm[28].y, lm[31].y, lm[32].y);
     const shMidY = (lm[11].y + lm[12].y) * 0.5;
     const spanY = Math.max(0.14, Math.abs(ankMidY - shMidY));
+    const shNorm = Math.abs(lm[11].x - lm[12].x) / spanY;
+
+    // Emphasize active swing / turned-sideways frames over idle camera-facing pauses
+    let wristMove = 0;
+    if (i > 0 && rawFrames[i - 1].lm2d) {
+      const pLm = rawFrames[i - 1].lm2d;
+      wristMove = Math.max(
+        Math.hypot(lm[16].x - pLm[16].x, lm[16].y - pLm[16].y),
+        Math.hypot(lm[15].x - pLm[15].x, lm[15].y - pLm[15].y)
+      );
+    }
+    const frameWeight = (shNorm < 0.28 ? 2.6 : 0.75) * (1.0 + Math.min(3.0, wristMove * 35));
 
     const toeDir = ((lm[31].x - lm[29].x) + (lm[32].x - lm[30].x)) * 0.5;
     const earMidX = (lm[7].x + lm[8].x) * 0.5;
@@ -566,26 +596,30 @@ function estimateClipCourtYawDeg(rawFrames) {
     const wristOffset = (Math.abs(lm[16].x - shMidX) > Math.abs(lm[15].x - shMidX))
       ? (lm[16].x - hipMidX)
       : (lm[15].x - hipMidX);
-    votesLeftRight += toeDir * 1.4 + noseDir * 2.0 + wristOffset * 1.8;
+    votesLeftRight += (toeDir * 1.8 + noseDir * 2.0 + wristOffset * 1.2) * frameWeight;
 
-    shoulderNormSum += Math.abs(lm[11].x - lm[12].x) / spanY;
-    validShCount++;
+    shoulderNormSum += shNorm * frameWeight;
+    weightSum += frameWeight;
 
     if (lm3 && lm3.length >= 9) {
       const earMidZ3 = (lm3[7].z + lm3[8].z) * 0.5;
-      noseDepthVote += (lm3[0].z - earMidZ3); // >0 => facing away from camera (+Z), <0 => toward camera
+      noseDepthSum += (lm3[0].z - earMidZ3) * frameWeight;
+      noseWeightSum += frameWeight;
     }
   }
 
   const facingSign = votesLeftRight < 0 ? -1 : 1;
-  const meanShNorm = validShCount > 0 ? shoulderNormSum / validShCount : 0.22;
+  const meanShNorm = weightSum > 0 ? shoulderNormSum / weightSum : 0.20;
+  const meanNoseZ = noseWeightSum > 0 ? noseDepthSum / noseWeightSum : 0;
   const profileRatio = clampVal((0.36 - meanShNorm) / 0.24, 0, 1);
 
-  // Rear-diagonal (~45 deg) vs pure side profile (~88 deg) vs front-diagonal (~135 deg)
-  const facingAway = noseDepthVote >= 0;
-  let yawMag = 32 + profileRatio * 56; // 32° rear/front diagonal .. 88° side profile
-  if (!facingAway && profileRatio < 0.75) {
-    yawMag = 148 - profileRatio * 58;
+  // Rear-diagonal (~42 deg) -> Side profile (~86 deg) -> Slight front-side (~98 deg).
+  // Only wrap past 110 deg if player faces square toward camera even during swing strokes.
+  let yawMag = 44 + profileRatio * 44; // 44° .. 88°
+  if (meanNoseZ < -0.14 && meanShNorm > 0.34) {
+    yawMag = 115 + clampVal((meanShNorm - 0.34) * 80, 0, 22);
+  } else if (meanNoseZ < -0.02 && profileRatio >= 0.45) {
+    yawMag = clampVal(76 + (1 - profileRatio) * 18, 74, 96);
   }
   return facingSign < 0 ? -yawMag : yawMag;
 }
@@ -973,13 +1007,21 @@ function detectImpactSwings(frames, duration, dominantHand = 'right', facingSign
     const b = frames[i];
     const dt = Math.max(0.016, b.time - a.time);
     if (!a.lm2d || !b.lm2d) continue;
-    const wrDisp = Math.hypot(b.lm2d[wrIdx].x - a.lm2d[wrIdx].x, b.lm2d[wrIdx].y - a.lm2d[wrIdx].y) / dt;
+    // Measure wrist motion RELATIVE to hip center so walking/running across court doesn't trigger fake swings
+    const aRelX = a.lm2d[wrIdx].x - a.lm2d[hipIdx].x;
+    const aRelY = a.lm2d[wrIdx].y - a.lm2d[hipIdx].y;
+    const bRelX = b.lm2d[wrIdx].x - b.lm2d[hipIdx].x;
+    const bRelY = b.lm2d[wrIdx].y - b.lm2d[hipIdx].y;
+    const wrDisp = Math.hypot(bRelX - aRelX, bRelY - aRelY) / dt;
     const tipDisp = (a.racket2d && b.racket2d)
-      ? Math.hypot(b.racket2d.tip.x - a.racket2d.tip.x, b.racket2d.tip.y - a.racket2d.tip.y) / dt
+      ? Math.hypot(
+          (b.racket2d.tip.x - b.lm2d[hipIdx].x) - (a.racket2d.tip.x - a.lm2d[hipIdx].x),
+          (b.racket2d.tip.y - b.lm2d[hipIdx].y) - (a.racket2d.tip.y - a.lm2d[hipIdx].y)
+        ) / dt
       : wrDisp;
     // Bonus weight when wrist is positioned forward of hip in hitting direction
-    const forwardBonus = ((b.lm2d[wrIdx].x - b.lm2d[hipIdx].x) * facingSign) > 0.02 ? 1.25 : 0.85;
-    speeds[i] = (wrDisp * 0.55 + tipDisp * 0.45) * forwardBonus;
+    const forwardBonus = (bRelX * facingSign) > 0.02 ? 1.30 : 0.85;
+    speeds[i] = (wrDisp * 0.60 + tipDisp * 0.40) * forwardBonus;
     frames[i].wristSpeed = speeds[i];
   }
 
@@ -990,11 +1032,16 @@ function detectImpactSwings(frames, duration, dominantHand = 'right', facingSign
     return prev * 0.25 + s * 0.5 + next * 0.25;
   });
 
+  const totalDur = duration || frames[frames.length - 1].time || 2.4;
+  const minEdge = totalDur > 1.8 ? 0.42 : 0.10;
+  const maxEdge = totalDur > 1.8 ? totalDur - 0.30 : totalDur - 0.08;
   const maxSpd = Math.max(...smoothSpd, 0.01);
   const candidates = [];
   for (let i = 1; i < smoothSpd.length - 1; i++) {
-    if (smoothSpd[i] >= smoothSpd[i - 1] && smoothSpd[i] >= smoothSpd[i + 1] && smoothSpd[i] >= maxSpd * 0.42) {
-      candidates.push({ i, t: frames[i].time, spd: smoothSpd[i] });
+    const t = frames[i].time;
+    if (t < minEdge || t > maxEdge) continue;
+    if (smoothSpd[i] >= smoothSpd[i - 1] && smoothSpd[i] >= smoothSpd[i + 1] && smoothSpd[i] >= maxSpd * 0.50) {
+      candidates.push({ i, t, spd: smoothSpd[i] });
     }
   }
 
@@ -1014,7 +1061,6 @@ function detectImpactSwings(frames, duration, dominantHand = 'right', facingSign
     kept.push({ i: bestI, t: t2Time, spd: maxSpd });
   }
 
-  const totalDur = duration || frames[frames.length - 1].time || 2.4;
   return kept.map((c, idx) => ({
     index: idx,
     t2Time: c.t,
@@ -1068,17 +1114,26 @@ function computeStaticCropBox(frames, swingWindow = null) {
     return { minX: 0, maxX: 1, minY: 0, maxY: 1, cx: 0.5, cy: 0.5, spanW: 1, spanH: 1 };
   }
 
-  // Extra top clearance above nose (0) so forehead/cap is never clipped, +15% global padding
-  minY -= 0.055;
+  // Extra top clearance above nose (0) relative to full stature so hair/cap/top-swing never get clipped
+  let sumNoseY = 0, sumAnkY = 0, spanCnt = 0;
+  for (const f of useFrames) {
+    if (f.lm2d && f.lm2d[0] && f.lm2d[27] && f.lm2d[28]) {
+      sumNoseY += f.lm2d[0].y;
+      sumAnkY += Math.max(f.lm2d[27].y, f.lm2d[28].y);
+      spanCnt++;
+    }
+  }
+  const avgBodySpan = spanCnt > 0 ? Math.max(0.18, (sumAnkY - sumNoseY) / spanCnt) : 0.28;
+  minY -= Math.max(0.06, avgBodySpan * 0.24);
   const rawW = Math.max(0.20, maxX - minX);
   const rawH = Math.max(0.28, maxY - minY);
   const padX = rawW * 0.16;
-  const padY = rawH * 0.15;
+  const padY = rawH * 0.16;
 
   const outMinX = clampVal(minX - padX, 0, 0.85);
   const outMaxX = clampVal(maxX + padX, outMinX + 0.15, 1);
-  const outMinY = clampVal(minY - padY, 0, 0.85);
-  const outMaxY = clampVal(maxY + padY, outMinY + 0.15, 1);
+  const outMinY = clampVal(minY - padY * 1.15, 0, 0.82);
+  const outMaxY = clampVal(maxY + padY * 0.90, outMinY + 0.15, 1);
 
   return {
     minX: outMinX,
@@ -1141,10 +1196,10 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
   if (typeof render3DOverlayStage === 'function') render3DOverlayStage();
 
   const duration = videoEl.duration;
-  // Sample at up to ~28 fps for crisp swing coverage, capped at 110 frames for 2-5 sec scan speed
-  const maxFrames = 110;
-  const targetFps = Math.min(28, Math.max(12, maxFrames / Math.max(0.4, duration)));
-  const totalSamples = Math.max(6, Math.min(maxFrames, Math.floor(duration * targetFps) + 1));
+  // Pass 1: Uniform coverage across the clip (capped at 88 samples)
+  const maxCoarseFrames = duration > 7.0 ? 84 : 104;
+  const targetFps = Math.min(28, Math.max(10, maxCoarseFrames / Math.max(0.4, duration)));
+  const totalSamples = Math.max(6, Math.min(maxCoarseFrames, Math.floor(duration * targetFps) + 1));
 
   // Offscreen analysis canvas (scaled to <= 384px wide for fast pixel + MediaPipe inference)
   const vw = videoEl.videoWidth || 640;
@@ -1160,22 +1215,12 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
     ? (engine.poseLandmarkerPro || engine.poseLandmarker)
     : engine.poseLandmarker;
 
-  const rawSamples = [];
-  const grayStack = [];
-
-  for (let i = 0; i < totalSamples; i++) {
-    if (scan._token !== scanToken) return null; // superseded by new upload
-    const t = totalSamples === 1 ? 0 : (i / (totalSamples - 1)) * Math.max(0.1, duration - 0.03);
+  const sampleAtTime = async (t) => {
     await waitForVideoSeek(videoEl, t);
     if (scan._token !== scanToken) return null;
-
     scanCtx.drawImage(videoEl, 0, 0, aw, ah);
     const imgData = scanCtx.getImageData(0, 0, aw, ah);
     const luma = rgbaToLuma(imgData.data, aw, ah);
-    if (i % Math.max(1, Math.floor(totalSamples / 11)) === 0) {
-      grayStack.push(luma);
-    }
-
     let lm2d = null;
     let lm3d = null;
     if (engine.mediapipeLoaded && landmarker) {
@@ -1190,13 +1235,68 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
         }
       } catch (e) {}
     }
+    return { time: t, lm2d, lm3d, rgba: imgData.data, luma };
+  };
 
-    rawSamples.push({ time: t, lm2d, lm3d, rgba: imgData.data, luma });
-    scan.progress = ((i + 1) / totalSamples) * 0.78;
+  let rawSamples = [];
+  const grayStack = [];
+
+  for (let i = 0; i < totalSamples; i++) {
+    if (scan._token !== scanToken) return null;
+    const t = totalSamples === 1 ? 0 : (i / (totalSamples - 1)) * Math.max(0.1, duration - 0.03);
+    const sample = await sampleAtTime(t);
+    if (!sample) return null;
+    if (i % Math.max(1, Math.floor(totalSamples / 11)) === 0) {
+      grayStack.push(sample.luma);
+    }
+    rawSamples.push(sample);
+    scan.progress = ((i + 1) / totalSamples) * (duration > 7.0 ? 0.58 : 0.78);
     scan.statusText = `Сканирование ${i + 1}/${totalSamples} кадров (MediaPipe 3D)...`;
     if (onProgress) onProgress(scan.progress, scan.statusText);
     if (i % 4 === 0 && typeof render3DOverlayStage === 'function') render3DOverlayStage();
     await new Promise(r => setTimeout(r, 0));
+  }
+
+  if (scan._token !== scanToken) return null;
+
+  // Pass 2: High-FPS dense swing refinement on longer clips (> 7s) around primary peak hip-relative velocity
+  if (duration > 7.0 && rawSamples.length >= 6) {
+    let bestT = duration * 0.5;
+    let bestSpd = 0;
+    const estDomHand = detectClipDominantHand(rawSamples);
+    const wIdx = estDomHand === 'left' ? 15 : 16;
+    const hIdx = estDomHand === 'left' ? 23 : 24;
+    for (let i = 1; i < rawSamples.length; i++) {
+      const a = rawSamples[i - 1];
+      const b = rawSamples[i];
+      if (!a.lm2d || !b.lm2d) continue;
+      if (b.time < 0.42 || b.time > duration - 0.30) continue;
+      const dt = Math.max(0.02, b.time - a.time);
+      const relDx = (b.lm2d[wIdx].x - b.lm2d[hIdx].x) - (a.lm2d[wIdx].x - a.lm2d[hIdx].x);
+      const relDy = (b.lm2d[wIdx].y - b.lm2d[hIdx].y) - (a.lm2d[wIdx].y - a.lm2d[hIdx].y);
+      const spd = Math.hypot(relDx, relDy) / dt;
+      if (spd > bestSpd) {
+        bestSpd = spd;
+        bestT = b.time;
+      }
+    }
+    const refineStart = Math.max(0, bestT - 1.10);
+    const refineEnd = Math.min(Math.max(0.1, duration - 0.03), bestT + 1.10);
+    const denseCount = 28;
+    for (let k = 0; k < denseCount; k++) {
+      if (scan._token !== scanToken) return null;
+      const rt = refineStart + (k / (denseCount - 1)) * Math.max(0.2, refineEnd - refineStart);
+      if (rawSamples.some(s => Math.abs(s.time - rt) < 0.032)) continue;
+      const sample = await sampleAtTime(rt);
+      if (!sample) return null;
+      rawSamples.push(sample);
+      scan.progress = 0.58 + ((k + 1) / denseCount) * 0.22;
+      scan.statusText = `Детализация удара (${k + 1}/${denseCount}, ~15+ FPS)...`;
+      if (onProgress) onProgress(scan.progress, scan.statusText);
+      if (k % 5 === 0 && typeof render3DOverlayStage === 'function') render3DOverlayStage();
+      await new Promise(r => setTimeout(r, 0));
+    }
+    rawSamples.sort((a, b) => a.time - b.time);
   }
 
   if (scan._token !== scanToken) return null;
@@ -1235,12 +1335,18 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
       const wrIdx = domHand === 'left' ? 15 : 16;
       const elIdx = domHand === 'left' ? 13 : 14;
       const hnIdx = domHand === 'left' ? 19 : 20;
+      const lm2 = s.lm2d;
+      const hipMinX = Math.min(lm2[23].x, lm2[24].x, lm2[25].x, lm2[26].x) - 0.025;
+      const hipMaxX = Math.max(lm2[23].x, lm2[24].x, lm2[25].x, lm2[26].x) + 0.025;
+      const hipMinY = Math.min(lm2[23].y, lm2[24].y);
+      const hipMaxY = Math.max(lm2[25].y, lm2[26].y) + 0.02;
+      const bodyBoxNorm = { minX: hipMinX, maxX: hipMaxX, minY: hipMinY, maxY: hipMaxY };
       const rgbaRef = s.rgba;
       rgbaRef._luma = s.luma;
       racket2d = detectRacketPixelsInFrame(
         rgbaRef, prevGray, bgPlate, aw, ah,
-        s.lm2d[wrIdx], s.lm2d[elIdx], s.lm2d[hnIdx],
-        facingSign, prevDir
+        lm2[wrIdx], lm2[elIdx], lm2[hnIdx],
+        facingSign, prevDir, bodyBoxNorm
       );
       prevDir = racket2d.dir;
     }
@@ -1251,9 +1357,10 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
   // Bidirectional zero-lag smoothing on 2D, 3D worldLandmarks & tracked racket vector
   const smoothed = smoothScannedFrames(assembledFrames);
 
-  // Detect candidate T2 peak impact moments & compute 3D metric pose per frame
+  // Detect candidate T2 peak impact moments & select the strongest clean primary stroke
   const swings = detectImpactSwings(smoothed, duration, domHand, facingSign);
-  const activeSwing = swings[0];
+  const bestSwingIdx = swings.reduce((best, s, i) => (s.peakSpeed > swings[best].peakSpeed ? i : best), 0);
+  const activeSwing = swings[bestSwingIdx] || swings[0];
 
   // Estimate low-to-high racket tip trajectory slope right into T2
   let t2SwingPathDeg = 22;
@@ -1281,7 +1388,7 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
 
   scan.frames = smoothed;
   scan.swings = swings;
-  scan.activeSwingIdx = 0;
+  scan.activeSwingIdx = bestSwingIdx;
   scan.dominantHand = domHand;
   scan.facingSign = facingSign;
   scan.clipYawDeg = clipYawDeg;
@@ -1314,8 +1421,9 @@ async function prescanVideoClip(videoEl, slot, onProgress) {
   if (slot === 'user') {
     engine.userDetectedCam.yaw = clipYawDeg;
     engine.userDetectedCam.isLiveTracked = true;
-    Viewer3D.cam.yaw = clipYawDeg;
-    Viewer3D.cam.pitch = 12;
+    // Optimal 3/4 isometric court camera so BOTH forward contact (+Z) & elbow spacing (+X) show clearly
+    Viewer3D.cam.yaw = facingSign < 0 ? -58 : 58;
+    Viewer3D.cam.pitch = 14;
     Viewer3D.cam.panY = 0;
   }
 
@@ -1696,7 +1804,7 @@ function updateSidebarWithLiveVideoMetrics() {
     sumEl.innerHTML = `
       <div class="mb-1.5 text-xs text-slate-200 bg-slate-900/90 border border-rose-500/40 rounded-lg p-2 space-y-1">
         <div class="font-bold text-rose-300">🔍 Реальная 3D-диагностика в точке удара (T2):</div>
-        <div>1️⃣ <strong>Точка удара:</strong> <span class="text-rose-400 font-bold">${lateBadge}</span> эталона (+${vm.contactOffsetCm} см vs +${proCon} см у Профи)</div>
+        <div>1️⃣ <strong>Точка удара:</strong> <span class="text-rose-400 font-bold">${lateBadge}</span> эталона (${vm.contactOffsetCm >= 0 ? '+' : ''}${vm.contactOffsetCm} см vs ${proCon >= 0 ? '+' : ''}${proCon} см у Профи)</div>
         <div>2️⃣ <strong>Локоть бьющей руки:</strong> <span class="text-amber-300 font-bold">${vm.elbowSpacingCm} см от корпуса</span> (Профи: ${proElb} см)</div>
         <div>3️⃣ <strong>Траектория ракетки:</strong> разгон <strong class="text-sky-300">+${vm.swingPathAngleDeg}°</strong> (Профи +${proPath}°) → <strong>${vm.spinRpm} RPM</strong>, глубина <strong class="text-rose-300">-${vm.shortfallM} м до цели</strong></div>
       </div>
@@ -1721,7 +1829,7 @@ function updateSidebarWithLiveVideoMetrics() {
           <span class="px-1.5 py-0.5 rounded text-xs font-bold bg-rose-500/30 text-rose-200">Ошибка #1 · Контакт</span>
           <span class="text-xs font-mono text-rose-300 font-bold">${vm.contactLateCm >= 0 ? '-' : '+'}${lateAbs} см</span>
         </div>
-        <div class="text-xs font-bold text-white mb-0.5">Вынос впереди таза: +${vm.contactOffsetCm} см (Профи +${proCon} см)</div>
+        <div class="text-xs font-bold text-white mb-0.5">Вынос впереди таза: ${vm.contactOffsetCm >= 0 ? '+' : ''}${vm.contactOffsetCm} см (Профи ${proCon >= 0 ? '+' : ''}${proCon} см)</div>
         <p class="text-xs text-slate-300 leading-snug"><strong>Рекомендация:</strong> встречайте мяч раньше, впереди ведущего бедра (+${proCon} см) для свободного разгона.</p>
       </div>
 
@@ -1969,8 +2077,9 @@ function updateAITelemetryBanner() {
 
   const metricsEl = document.getElementById('ai-angle-metrics-text');
   if (metricsEl) {
+    const fmtSignedCm = (v) => `${v >= 0 ? '+' : ''}${v}`;
     const lateText = vm.contactLateCm >= 0
-      ? `Контакт на ${vm.contactLateCm} см позже (+${vm.contactOffsetCm} vs +${proCon} см)`
+      ? `Контакт на ${vm.contactLateCm} см позже (${fmtSignedCm(vm.contactOffsetCm)} vs ${fmtSignedCm(proCon)} см)`
       : `Контакт на ${Math.abs(vm.contactLateCm)} см раньше`;
     metricsEl.innerHTML =
       `Точка удара (T2): <strong class="text-rose-400">${lateText}</strong> · ` +

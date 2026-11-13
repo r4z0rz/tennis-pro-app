@@ -86,9 +86,9 @@ persp = 4.4 / max(1.2, 4.4 - z2)
 
 ### Key DOM IDs (`index.html` ↔ JS)
 - Video elements: `#user-video-element`, `#pro-video-element`
-- Canvases: `#overlay-canvas` (`960x600`), `#cause-effect-canvas` (`960x122`)
-- Controls: `#preset-selector`, `#video-scrubber`, `#swing-selector-wrap`, `#swing-selector`, `#video-calibration-bar`, `#btn-clear-video`, `#camera-setup-guide-panel`
-- HUD & Sidebar: `#ai-align-status-badge`, `#ai-angle-metrics-text`, `#hud-phase-name`, `#hud-weight-transfer`, `#biomech-score`, `#biomech-summary`, `#discrepancy-list`, `#coach-tip-box`
+- Canvases: `#overlay-canvas` (`960x600` desktop landscape / responsive `640x800` portrait stacked when viewport `< 640px` wide), `#cause-effect-canvas` (`960x122`)
+- Controls: `#preset-selector`, `#video-scrubber`, `#swing-selector-wrap`, `#swing-selector`, `#video-calibration-bar`, `#btn-clear-video`, `#camera-setup-guide-panel`, `#btn-video-play`
+- HUD & Sidebar: `#ai-align-status-badge`, `#ai-angle-metrics-text`, `#hud-phase-name`, `#hud-weight-transfer`, `#biomech-score`, `#biomech-summary`, `#discrepancy-list`, `#coach-tip-box` (all HUD telemetry & 3D preset controls live cleanly **outside** `#canvas-dropzone` so nothing occludes video/3D rigs)
 
 ---
 
@@ -111,18 +111,22 @@ Synthesized from the user's specification, 3 Russian audio notes from the father
 - **`v10` (`c310da6`)**: Enabled tracking for `'pro'` uploaded video slot (`liveProLandmarks2D`, `liveProPose3D`, `proVideoMetrics`).
 - **`v11` (`d8cd3b2`)**: Split MediaPipe into dual `PoseLandmarker` instances (`poseLandmarker`, `poseLandmarkerPro` using `pose_landmarker_full`), separated `proVideoLock` vs `videoLock`, added outlier clamping and headroom safety.
 - **`v12` (`f78c1f8`)**: Major architectural overhaul — replaced live laggy inference with async `prescanVideoClip`, added `detectRacketPixelsInFrame` (PCA + median background plate), true `convertWorldLandmarksToCourtPose3D` (court azimuth rotation + anatomical bone normalization), bidirectional zero-lag `smoothScannedFrames`, multi-swing `detectImpactSwings`, static `cropBox`, side-by-side full-height columns for 2 videos, deterministic dual-video playback sync (`mapProgressToClipTime`), swing selector, and 1-click `nudgeImpactT2Here()`.
-- **`v13` (current pending commit)**:
-  - Fixed viewport column bounding bug in `drawCleanVideoCover` / `drawDirectVideo3DAthlete` by returning `{ viewX, viewY, viewW, viewH }` and clamping the `🎾 РАКЕТКА` badge cleanly inside each column (`vxMin .. vxMax`) so two-column side-by-side labels never clip across the center seam or negative `dx`.
-  - Replaced hardcoded `+38 см` / `27 см` / `+29°` baseline strings and negative-sign formatting in `drawAceCueBiomechanicalCallouts` with live dynamic `proVideoMetrics` comparisons and early/late sign handling.
-  - Fixed `onPresetChange(val)` in `js/app.js` so switching reference stroke presets while a user video is loaded recomputes/preserves live video comparison metrics instead of resetting the sidebar to static placeholder data.
+- **`v13` (`3f3267e`)**:
+  - Fixed viewport column bounding bug in `drawCleanVideoCover` / `drawDirectVideo3DAthlete` by returning `{ viewX, viewY, viewW, viewH }` and clamping `🎾 РАКЕТКА` labels inside each column.
+  - Replaced hardcoded Pro baseline callout strings in `drawAceCueBiomechanicalCallouts` with live dynamic `proVideoMetrics` comparisons.
+  - Fixed `onPresetChange(val)` in `js/app.js` so switching presets preserves analyzed user video metrics.
+- **`v14` (Verified in Live Headless Chrome E2E on Desktop `1280x840` + Mobile `390x844` with Real `.mov` Clips)**:
+  - **Zero Canvas Occlusion & Mobile Portrait Stack Layout (`index.html`, `js/viewer3d.js`)**: Moved overlaid `Top Right 3D Camera Angle Presets` and `Bottom Telemetry HUD` outside `#canvas-dropzone` into a compact external toolbar below `#overlay-canvas`, and replaced the tall wrapped mobile header/control chrome with a single-line horizontally scrollable module bar. On viewports `< 640px` (`isMobilePortrait`), `render3DOverlayStage()` dynamically switches `#overlay-canvas` to `640x800` vertical stack (Top half = side-by-side portrait Mode 1 `ПРОФИ | ВЫ`, Bottom half = full-width Mode 2 3D Rig Overlay) instead of crushing 3 columns into `< 390px`. Also moved Mode 2 engineering callouts to a 3-column non-overlapping bottom dock inside the 3D pane (`drawAceCueBiomechanicalCallouts`).
+  - **3D Court Azimuth Fix (`estimateClipCourtYawDeg` in `js/ai_pose_align.js`)**: Weighted turned/active frames (`shNorm < 0.28`, moving wrist) 3x above flat idle pauses and prevented front-side threshold from wrapping `75°–95°` side-profile tennis clips to `-137°`. Tested with both real portrait `.mov` clips: Coach `clipYawDeg = -84.9°`, Student `clipYawDeg = -82.3°`.
+  - **2-Pass 20s Swing Refinement & Hip-Relative Speed (`prescanVideoClip`, `detectImpactSwings`)**: For clips `> 7s`, added Pass-2 dense swing sampling (`28` frames around `[bestT - 1.1s .. bestT + 1.1s]`), switched swing velocity from global screen translation to **hip-relative wrist velocity (`wr - hip`)**, filtered `[0..0.42s]` initialization spikes, and selected the peak-velocity primary stroke as `activeSwingIdx`.
+  - **Pixel-Vision PCA Hardening & Crop Headroom (`detectRacketPixelsInFrame`, `computeStaticCropBox`)**: Masked out the static dark clothing/skirt/shorts column `(hip..knee)` unless high motion energy (`mot >= 26`), enforced hand-knuckle hemisphere alignment (`knuckAlign >= -0.05`) without bypass, and raised top scalp/follow-through headroom relative to `(ankleY - noseY)` so players' heads remain unclipped.
+  - **UI Safety & Sign Formatting (`js/app.js`, `js/ai_pose_align.js`, `js/viewer3d.js`)**: Null-guarded `badge-pro` in `onPresetChange()`, fixed `+-N см` double signs when `contactOffsetCm < 0`, and aligned `#hud-weight-transfer` to report front-foot load % (`Math.max(weightL, weightR)`).
+  - **Live Chrome E2E Verification (`task-978`, 0 page/console errors)**: Tested against `480x854` Coach (`6.13s`, 104 scanned frames, T2 @ `4.15s`, `contactOffsetCm = +18cm`, `elbowSpacingCm = 28cm`, `swingPathAngleDeg = +42°`) & Student (`20.16s`, 112 frames via 2-pass scan, T2 @ `11.28s`, `contactOffsetCm = -8cm` -> `26cm` late, `elbowSpacingCm = 20cm`, score `7.6/10`), verified Play/Pause state advance & freeze (`0.62 -> 0.6838 -> pause`), and visually inspected both Desktop & Mobile rendered PNGs.
 
 ---
 
 ## 6. Known Limitations & Next Engineering Priorities (For Synced Agents)
 
-1. **Browser E2E Verification with Real MP4/MOV Clips**: All `v12`/`v13` logic is verified in Node VM with synthetic frames/PCA bars, and MediaPipe is loaded via CDN in browser. Need live headless Chrome / manual verification with real portrait & landscape tennis videos (e.g., iPhone 60fps MOV/MP4) to validate:
-   - `prescanVideoClip` seek speed & MediaPipe GPU/CPU fallback across long clips (>10s).
-   - Accuracy of `estimateClipCourtYawDeg` on pure front vs 45° rear vs 90° side angles.
-2. **Stroke-Specific `T2` Heuristics**: Currently `detectImpactSwings` weights horizontal forward wrist extension + peak wrist/tip speed. For **Serve (`serve`)**, `T2` happens at **peak upward vertical reach** (`wristY` minimum near `headY - height`); adding stroke-aware T2 scoring in `detectImpactSwings(frames, dur, domHand, facingSign, preset)` will improve Serve & Smash auto-detection.
-3. **True `worldLandmarks` Azimuth Refinement**: Currently uses 2D horizontal/profile cues (`shoulderWidthNorm`, toe/nose dirVote, `noseDepthVote`) to pick clip yaw `32°..88°`. Can be upgraded by fitting horizontal principal axis of pelvis/feet trajectory directly from 3D `worldLandmarks` `(X, Z)` across `[T0..T2]`!
-4. **Hoop-Center Ball Localization Refinement**: `rFaceNormal` and `pose3D.ball` are currently projected forward `+0.10m` from racket hoop center; could track the actual yellow-green optic ball pixel blob around `t2Time ± 0.12s` during pre-scan to pinpoint true ball contact frame to `±1` frame!
+1. **Stroke-Specific `T2` Heuristics**: `detectImpactSwings` currently scores forehand/groundstroke swings via hip-relative horizontal+vertical wrist speed (`forwardBonus`). For **Serve (`serve`)**, `T2` happens at peak upward vertical reach (`wristY` minimum above `headY`); adding stroke-aware T2 scoring in `detectImpactSwings` will improve Serve & Smash auto-detection.
+2. **True `worldLandmarks` Azimuth Refinement**: Currently `estimateClipCourtYawDeg` maps active-weighted 2D/3D cues into `44°..98°` (or `115°+` if strictly front-facing during strokes). Fitting the horizontal principal axis of pelvis/feet progression directly from 3D `worldLandmarks` `(X, Z)` across `[T0..T2]` would refine pure rear-vs-diagonal angles.
+3. **Hoop-Center Ball Localization Refinement**: `rFaceNormal` and `pose3D.ball` project forward from the PCA racket hoop center; tracking optic yellow-green ball contour around `t2Time ± 0.12s` during pre-scan can pinch contact-frame precision to `±1` frame.

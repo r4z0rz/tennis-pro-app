@@ -224,7 +224,8 @@ function renderAceCueSidebar() {
 
   // Update badges if no custom video is loaded
   if (!AppState.overlay.proVideoLoaded) {
-    document.getElementById('badge-pro').textContent = `⭐ 3D ЭТАЛОН ATP: ${stroke.proName.toUpperCase()}`;
+    const badgePro = document.getElementById('badge-pro');
+    if (badgePro) badgePro.textContent = `⭐ 3D ЭТАЛОН ATP: ${stroke.proName.toUpperCase()}`;
   }
 }
 
